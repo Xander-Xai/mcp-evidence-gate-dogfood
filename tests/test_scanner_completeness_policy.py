@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts.build_scanner_completeness_cases import build_cases
+from scripts.capture_core_evaluation_timestamp import capture, parse_timestamp
 from scripts.derive_producer_adversarial_cases import derive
 from scripts.scanner_completeness_policy import evaluate
 
@@ -65,6 +67,72 @@ class ScannerCompletenessPolicyTests(unittest.TestCase):
             tampered = evaluate(derived / "tampered" / "receipt.json", derived / "tampered" / "evidence.json", ARTIFACT)
             self.assertEqual(tampered["integrity"], "inconclusive")
             self.assertEqual(tampered["admission"], "blocked")
+
+    def test_runtime_evaluation_timestamp_is_timezone_aware_and_ordered(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dogfood-evaluation-time-") as directory:
+            receipt = Path(directory) / "receipt.json"
+            receipt.write_text(
+                json.dumps({"scanned_at": "2026-09-16T13:45:23.123456Z"}),
+                encoding="utf-8",
+            )
+            captured = capture(
+                receipt,
+                now=datetime(2026, 9, 16, 13, 45, 24, 123456, tzinfo=timezone.utc),
+            )
+            self.assertEqual(captured, "2026-09-16T13:45:24.123456Z")
+            self.assertGreaterEqual(
+                parse_timestamp(captured),
+                parse_timestamp("2026-09-16T13:45:23.123456Z"),
+            )
+            with self.assertRaises(ValueError):
+                capture(
+                    receipt,
+                    now=datetime(2026, 9, 16, 13, 45, 22, tzinfo=timezone.utc),
+                )
+
+    def test_real_runtime_workflows_use_post_producer_timestamp(self) -> None:
+        scanner = (ROOT / ".github" / "workflows" / "scanner-completeness-consumer.yml").read_text(encoding="utf-8")
+        deterministic = scanner.split("  producer-generated-acceptance:", 1)[0]
+        self.assertIn("--now 2026-09-17T00:00:00Z", deterministic)
+
+        producer_job = scanner.split("  producer-generated-acceptance:", 1)[1].split(
+            "  producer-results-empty-acceptance:", 1
+        )[0]
+        capture_marker = "- name: Capture Core evaluation timestamp after Producer"
+        self.assertIn(capture_marker, producer_job)
+        self.assertNotIn("--now 2026-09-17T00:00:00Z", producer_job)
+        self.assertIn('--now "$CORE_EVALUATION_NOW"', producer_job)
+        self.assertIn("EVALUATION_TIMESTAMP_SOURCE=runtime_after_producer", producer_job)
+        self.assertLess(
+            producer_job.index("- name: Run real Producer on consumer-owned clean candidate"),
+            producer_job.index(capture_marker),
+        )
+        self.assertLess(
+            producer_job.index(capture_marker),
+            producer_job.index("- name: Verify Producer-generated clean evidence with Core"),
+        )
+
+        results_job = scanner.split("  producer-results-empty-acceptance:", 1)[1]
+        results_capture_marker = "- name: Capture Core evaluation timestamp after Results=[] Producer"
+        self.assertIn(results_capture_marker, results_job)
+        self.assertNotIn("--now 2026-09-17T00:00:00Z", results_job)
+        self.assertIn('--now "$CORE_EVALUATION_NOW"', results_job)
+        self.assertLess(
+            results_job.index("- name: Run Producer Results=[] compatibility harness"),
+            results_job.index(results_capture_marker),
+        )
+        self.assertLess(
+            results_job.index(results_capture_marker),
+            results_job.index("- name: Verify Producer Results=[] with strict Core"),
+        )
+
+        osv = (ROOT / ".github" / "workflows" / "real-osv-producer.yml").read_text(encoding="utf-8")
+        source_binding_job = osv.split(
+            "      - name: Run deterministic OSV source_binding mismatch acceptance", 1
+        )[1].split("      - name: Evaluate source_binding mismatch with Dogfood policy", 1)[0]
+        self.assertIn("- name: Capture Core evaluation timestamp after Producer", source_binding_job)
+        self.assertNotIn("--now 2026-09-17T00:00:00Z", source_binding_job)
+        self.assertIn('--now "$CORE_EVALUATION_NOW"', source_binding_job)
 
 
 if __name__ == "__main__":

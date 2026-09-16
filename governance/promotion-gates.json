@@ -94,7 +94,9 @@
       "gate_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
       "osv_version": "2.5.1",
       "osv_executable_sha256": "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be",
-      "database_snapshot": "unavailable"
+      "database_snapshot": "unavailable",
+      "evaluation_timestamp_source": "runtime_after_producer",
+      "evaluation_timestamp_contract": "CORE_EVALUATION_NOW is captured after Producer output and asserted >= producer.scanned_at before strict Core verification"
     },
     "real_multi_receipt_composition": {
       "workflow": ".github/workflows/real-multi-receipt-composition.yml",
@@ -122,6 +124,14 @@
       "deterministic_case_count": 9,
       "producer_generated_cases": ["clean", "false-clean", "tampered", "results-empty"],
       "source_binding_acceptance": "blocked_inconclusive",
+      "runtime_evaluation_timestamp": {
+        "variable": "CORE_EVALUATION_NOW",
+        "source": "runtime_after_producer",
+        "ordering_assertion": "evaluation_now >= producer_scanned_at",
+        "reused_for": ["clean", "false-clean", "tampered", "results-empty"],
+        "old_fixed_timestamp": "2026-09-17T00:00:00Z",
+        "old_fixed_timestamp_status": "SUPERSEDED"
+      },
       "previous_acceptance": {
         "producer_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
         "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
@@ -132,9 +142,9 @@
       "current_acceptance": {
         "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
         "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
-        "status": "current_target",
-        "hosted_acceptance": "PASS",
-        "hosted_acceptance_evidence": "Exact branch-head aggregate and independent workflow runs; run IDs are recorded in PR #12."
+        "status": "pending_p1_revalidation",
+        "hosted_acceptance": "PENDING",
+        "hosted_acceptance_evidence": "Runtime evaluation timestamp fix is committed; the prior 2192b917 exact-head runs are historical and fresh exact-head workflow runs are required."
       }
     },
     "real_oci_exact_identity": {

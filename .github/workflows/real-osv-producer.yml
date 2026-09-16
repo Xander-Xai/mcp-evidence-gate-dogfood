@@ -294,6 +294,20 @@ jobs:
             --producer-sha "$PRODUCER_SHA" \
             --core-sha "$GATE_SHA"
 
+      - name: Capture Core evaluation timestamp after Producer
+        id: evaluation_time
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODUCER_SCANNED_AT="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["scanned_at"])' \
+            "$RUNNER_TEMP/source-binding/receipt.json")"
+          CORE_EVALUATION_NOW="$(python scripts/capture_core_evaluation_timestamp.py \
+            --receipt "$RUNNER_TEMP/source-binding/receipt.json")"
+          echo "PRODUCER_SCANNED_AT=$PRODUCER_SCANNED_AT" >> "$GITHUB_ENV"
+          echo "CORE_EVALUATION_NOW=$CORE_EVALUATION_NOW" >> "$GITHUB_ENV"
+          echo "EVALUATION_TIMESTAMP_SOURCE=runtime_after_producer" >> "$GITHUB_ENV"
+          echo "core_evaluation_now=$CORE_EVALUATION_NOW" >> "$GITHUB_OUTPUT"
+
       - name: Build immutable Core Gate
         shell: bash
         run: |
@@ -313,7 +327,7 @@ jobs:
             --receipt "$RUNNER_TEMP/source-binding/receipt.json" \
             --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/requirements.txt" \
             --evidence "$RUNNER_TEMP/source-binding/evidence.json" \
-            --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z \
+            --policy strict-scanner-completeness --format json --now "$CORE_EVALUATION_NOW" \
             > "$RUNNER_TEMP/source-binding/core.json"
           code=$?
           set -e
@@ -350,6 +364,7 @@ jobs:
           import json
           import os
           import sys
+          from datetime import datetime, timezone
           from pathlib import Path
 
           out, core_code, policy_code, manifest_path = sys.argv[1:]
@@ -359,6 +374,15 @@ jobs:
           policy = json.loads((out / "policy.json").read_text(encoding="utf-8"))
           core = json.loads((out / "core.json").read_text(encoding="utf-8"))
           execution = evidence["scanner_execution"]
+
+          def parse_timestamp(value: str) -> datetime:
+              normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+              parsed = datetime.fromisoformat(normalized)
+              assert parsed.tzinfo is not None
+              return parsed.astimezone(timezone.utc)
+
+          assert os.environ["EVALUATION_TIMESTAMP_SOURCE"] == "runtime_after_producer"
+          assert parse_timestamp(os.environ["CORE_EVALUATION_NOW"]) >= parse_timestamp(receipt["scanned_at"])
 
           assert receipt["verdict"] == "inconclusive"
           assert execution["completeness_status"] == "incomplete"
@@ -386,6 +410,9 @@ jobs:
               "core_sha": os.environ["GATE_SHA"],
               "producer_receipt_digest": digest(out / "receipt.json"),
               "producer_evidence_digest": digest(out / "evidence.json"),
+              "producer_scanned_at": receipt["scanned_at"],
+              "core_evaluation_now": os.environ["CORE_EVALUATION_NOW"],
+              "evaluation_timestamp_source": os.environ["EVALUATION_TIMESTAMP_SOURCE"],
               "receipt_verdict": receipt["verdict"],
               "scanner_execution": execution,
               "policy": policy,
@@ -402,6 +429,9 @@ jobs:
             echo "## OSV source_binding mismatch acceptance"
             echo
             echo "Producer classified a report bound to the wrong source path as incomplete/inconclusive."
+            echo "Producer scanned_at: \`$PRODUCER_SCANNED_AT\`"
+            echo "Core evaluation now: \`$CORE_EVALUATION_NOW\`"
+            echo "evaluation_now >= scanned_at: \`PASS\` (runtime_after_producer)"
             echo "Dogfood policy admission is \`blocked\` (exit \`$POLICY_CODE\`); Core strict decision is \`fail\` (exit \`$CORE_CODE\`)."
           } >> "$GITHUB_STEP_SUMMARY"
 

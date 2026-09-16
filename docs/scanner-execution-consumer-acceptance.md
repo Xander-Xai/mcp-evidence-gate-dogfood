@@ -163,10 +163,12 @@ evidence rather than a substitute for the hosted run. The prior Dogfood head
 `a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are
 `SUPERSEDED`.
 
-The exact branch-head acceptance is `POST_MERGE_EXACT_MAIN_ACCEPTANCE = PASS`:
+The pre-fix branch-head acceptance at Dogfood `2192b917e7d42fb6cb719ccd31307e82cb75a7b2`
+was `POST_MERGE_EXACT_MAIN_ACCEPTANCE = PASS` (historical pre-merge evidence):
 the aggregate promotion gate and each independent consumer workflow completed
-successfully with zero skipped critical jobs. The branch remains intentionally
-unmerged; the exact workflow run/job identifiers are recorded in PR #12.
+successfully with zero skipped critical jobs. Those runs remain historical after
+the runtime timestamp fix; fresh exact-head hosted acceptance is required before
+promotion.
 The immediately previous PR #12 head `3600e62afc6596d2f9fb9ccbb0ad7b1ea1ba2a21`
 is retained as `SUPERSEDED_AS_ACTIVE_IDENTITY`.
 
@@ -174,6 +176,20 @@ The promoted Core packaging check is `POST_MERGE_REMOTE_ACTION_LOAD = PASS`:
 the remote Action loaded `action.yml` and `dist/action/index.cjs` from Core
 `1c5a6cfae2901b97fc0925d0b102710d9a73cb82`, and all ten declared outputs plus
 the remote-vs-bundled comparison were asserted successfully.
+
+## Runtime evaluation timestamp closure
+
+The previous fixed runtime deadline `2026-09-17T00:00:00Z` is superseded for
+Producer-generated acceptance. After the Producer writes its receipt, the
+workflow captures one UTC `CORE_EVALUATION_NOW` through
+`scripts/capture_core_evaluation_timestamp.py`. The helper parses timestamps as
+timezone-aware datetimes and fails closed unless
+`evaluation_now >= producer.scanned_at`. The same value is reused for clean,
+false-clean, and tampered Core CLI verification, and the acceptance manifest
+records `producer_scanned_at`, `core_evaluation_now`, and
+`evaluation_timestamp_source=runtime_after_producer`. The Results=[] and OSV
+source-binding Producer-generated paths use the same post-Producer contract.
+Fully deterministic fixtures retain their fixed timestamps for reproducibility.
 
 ## Core promotion gate
 

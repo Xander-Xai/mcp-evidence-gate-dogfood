@@ -339,6 +339,20 @@ jobs:
             --out "$RUNNER_TEMP/producer-out"
         working-directory: ${{ runner.temp }}/producer
 
+      - name: Capture Core evaluation timestamp after Producer
+        id: evaluation_time
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODUCER_SCANNED_AT="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["scanned_at"])' \
+            "$RUNNER_TEMP/producer-out/receipt.json")"
+          CORE_EVALUATION_NOW="$(python scripts/capture_core_evaluation_timestamp.py \
+            --receipt "$RUNNER_TEMP/producer-out/receipt.json")"
+          echo "PRODUCER_SCANNED_AT=$PRODUCER_SCANNED_AT" >> "$GITHUB_ENV"
+          echo "CORE_EVALUATION_NOW=$CORE_EVALUATION_NOW" >> "$GITHUB_ENV"
+          echo "EVALUATION_TIMESTAMP_SOURCE=runtime_after_producer" >> "$GITHUB_ENV"
+          echo "core_evaluation_now=$CORE_EVALUATION_NOW" >> "$GITHUB_OUTPUT"
+
       - name: Run remote Core Action on promoted-main clean evidence
         id: remote_clean
         continue-on-error: true
@@ -368,7 +382,7 @@ jobs:
             --receipt "$RUNNER_TEMP/producer-out/receipt.json" \
             --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
             --evidence "$RUNNER_TEMP/producer-out/evidence.json" \
-            --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z \
+            --policy strict-scanner-completeness --format json --now "$CORE_EVALUATION_NOW" \
             > "$RUNNER_TEMP/producer-clean-core.json"
           code=$?
           set -e
@@ -401,7 +415,7 @@ jobs:
               --receipt "$RUNNER_TEMP/producer-adversarial/$name/receipt.json" \
               --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
               --evidence "$RUNNER_TEMP/producer-adversarial/$name/evidence.json" \
-              --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z \
+              --policy strict-scanner-completeness --format json --now "$CORE_EVALUATION_NOW" \
               > "$RUNNER_TEMP/producer-adversarial/$name/core.json"
             echo "$name=$?" >> "$RUNNER_TEMP/producer-adversarial/core-exit-codes"
           done
@@ -433,6 +447,7 @@ jobs:
           import json
           import os
           import sys
+          from datetime import datetime, timezone
           from pathlib import Path
 
           producer_out, clean_core_path, adversarial, manifest_path = map(Path, sys.argv[1:])
@@ -442,6 +457,17 @@ jobs:
           clean_core = json.loads(clean_core_path.read_text(encoding="utf-8"))
           policy_codes = dict(line.strip().split("=", 1) for line in (adversarial / "policy-exit-codes").read_text(encoding="utf-8").splitlines() if line.strip())
           core_codes = dict(line.strip().split("=", 1) for line in (adversarial / "core-exit-codes").read_text(encoding="utf-8").splitlines() if line.strip())
+
+          def parse_timestamp(value: str) -> datetime:
+              normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+              parsed = datetime.fromisoformat(normalized)
+              assert parsed.tzinfo is not None
+              return parsed.astimezone(timezone.utc)
+
+          producer_scanned_at = receipt["scanned_at"]
+          core_evaluation_now = os.environ["CORE_EVALUATION_NOW"]
+          assert os.environ["EVALUATION_TIMESTAMP_SOURCE"] == "runtime_after_producer"
+          assert parse_timestamp(core_evaluation_now) >= parse_timestamp(producer_scanned_at)
 
           finding_count = sum(len(row.get("Vulnerabilities") or []) for row in raw.get("Results", []))
           assert receipt["verdict"] == "clean"
@@ -509,6 +535,10 @@ jobs:
               "producer_verdict": receipt["verdict"],
               "producer_finding_count": finding_count,
               "producer_scanner_execution": evidence["scanner_execution"],
+              "producer_scanned_at": producer_scanned_at,
+              "core_evaluation_now": core_evaluation_now,
+              "evaluation_timestamp_source": os.environ["EVALUATION_TIMESTAMP_SOURCE"],
+              "core_evaluation_now_reused_for": ["clean", "false-clean", "tampered"],
               "clean_core_decision": clean_core["decision"],
               "remote_action": {
                   "outcome": os.environ["REMOTE_CLEAN_OUTCOME"],
@@ -550,6 +580,11 @@ jobs:
             echo "| Producer verdict | \`clean\` |"
             echo "| Producer findings | \`0\` |"
             echo "| Producer execution | \`complete\` |"
+            echo "| Producer scanned_at | \`$PRODUCER_SCANNED_AT\` |"
+            echo "| Core evaluation now | \`$CORE_EVALUATION_NOW\` |"
+            echo "| Evaluation timestamp source | \`$EVALUATION_TIMESTAMP_SOURCE\` |"
+            echo "| evaluation_now >= scanned_at | \`PASS\` |"
+            echo "| Shared Core evaluation timestamp | \`clean / false-clean / tampered\` |"
             echo "| Remote Core Action | \`pass / complete\` (strict policy) |"
             echo "| False-clean Core decision | \`fail\` (Core strict policy) |"
             echo "| False-clean dogfood admission | \`blocked\` |"
@@ -611,6 +646,20 @@ jobs:
             --producer-sha "$PRODUCER_PR_HEAD_SHA" \
             --core-sha "$GATE_SHA"
 
+      - name: Capture Core evaluation timestamp after Results=[] Producer
+        id: results_empty_evaluation_time
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRODUCER_SCANNED_AT="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["scanned_at"])' \
+            "$RUNNER_TEMP/results-empty/receipt.json")"
+          CORE_EVALUATION_NOW="$(python scripts/capture_core_evaluation_timestamp.py \
+            --receipt "$RUNNER_TEMP/results-empty/receipt.json")"
+          echo "PRODUCER_SCANNED_AT=$PRODUCER_SCANNED_AT" >> "$GITHUB_ENV"
+          echo "CORE_EVALUATION_NOW=$CORE_EVALUATION_NOW" >> "$GITHUB_ENV"
+          echo "EVALUATION_TIMESTAMP_SOURCE=runtime_after_producer" >> "$GITHUB_ENV"
+          echo "core_evaluation_now=$CORE_EVALUATION_NOW" >> "$GITHUB_OUTPUT"
+
       - name: Build immutable Core Gate
         shell: bash
         run: |
@@ -632,7 +681,7 @@ jobs:
             --evidence "$RUNNER_TEMP/results-empty/evidence.json" \
             --policy strict-scanner-completeness \
             --format json \
-            --now 2026-09-17T00:00:00Z \
+            --now "$CORE_EVALUATION_NOW" \
             > "$RUNNER_TEMP/results-empty/core.json"
           code=$?
           set -e
@@ -663,6 +712,7 @@ jobs:
           import json
           import os
           import sys
+          from datetime import datetime, timezone
           from pathlib import Path
 
           out, policy_path, core_path, manifest_path, policy_code, core_code = sys.argv[1:]
@@ -673,6 +723,15 @@ jobs:
           policy = json.loads(Path(policy_path).read_text(encoding="utf-8"))
           core = json.loads(Path(core_path).read_text(encoding="utf-8"))
           execution = evidence["scanner_execution"]
+
+          def parse_timestamp(value: str) -> datetime:
+              normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+              parsed = datetime.fromisoformat(normalized)
+              assert parsed.tzinfo is not None
+              return parsed.astimezone(timezone.utc)
+
+          assert os.environ["EVALUATION_TIMESTAMP_SOURCE"] == "runtime_after_producer"
+          assert parse_timestamp(os.environ["CORE_EVALUATION_NOW"]) >= parse_timestamp(receipt["scanned_at"])
 
           assert receipt["verdict"] == "inconclusive"
           assert raw["Results"] == []
@@ -703,6 +762,9 @@ jobs:
               "producer_receipt_digest": digest(out / "receipt.json"),
               "producer_evidence_digest": digest(out / "evidence.json"),
               "producer_raw_digest": digest(out / "trivy.raw.json"),
+              "producer_scanned_at": receipt["scanned_at"],
+              "core_evaluation_now": os.environ["CORE_EVALUATION_NOW"],
+              "evaluation_timestamp_source": os.environ["EVALUATION_TIMESTAMP_SOURCE"],
               "receipt_verdict": receipt["verdict"],
               "scanner_execution": execution,
               "policy": policy,
@@ -723,6 +785,10 @@ jobs:
             echo "| Producer exit | \`1\` |"
             echo "| Producer receipt | \`inconclusive\` |"
             echo "| Producer execution | \`incomplete / result_sections\` |"
+            echo "| Producer scanned_at | \`$PRODUCER_SCANNED_AT\` |"
+            echo "| Core evaluation now | \`$CORE_EVALUATION_NOW\` |"
+            echo "| Evaluation timestamp source | \`$EVALUATION_TIMESTAMP_SOURCE\` |"
+            echo "| evaluation_now >= scanned_at | \`PASS\` |"
             echo "| Core decision | \`fail\` |"
             echo "| Overall admission | \`blocked\` |"
           } >> "$GITHUB_STEP_SUMMARY"

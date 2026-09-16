@@ -220,11 +220,11 @@ jobs:
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Producer PR head | `$PRODUCER_PR_HEAD_SHA` |"
-            echo "| Core Gate | `$GATE_SHA` |"
-            echo "| Policy admission | `${{ matrix.expected_policy_admission }}` |"
-            echo "| Core decision | `${{ matrix.expected_core_decision }}` |"
-            echo "| Overall admission | `${{ matrix.expected_overall }}` |"
+            echo "| Producer PR head | \`$PRODUCER_PR_HEAD_SHA\` |"
+            echo "| Core Gate | \`$GATE_SHA\` |"
+            echo "| Policy admission | \`${{ matrix.expected_policy_admission }}\` |"
+            echo "| Core decision | \`${{ matrix.expected_core_decision }}\` |"
+            echo "| Overall admission | \`${{ matrix.expected_overall }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deterministic acceptance evidence
@@ -446,15 +446,15 @@ jobs:
             echo
             echo "| Field | Runtime value |"
             echo "| --- | --- |"
-            echo "| Producer PR head | `$PRODUCER_PR_HEAD_SHA` |"
-            echo "| Core Gate | `$GATE_SHA` |"
-            echo "| Producer verdict | `clean` |"
-            echo "| Producer findings | `0` |"
-            echo "| Producer execution | `complete` |"
-            echo "| False-clean Core decision | `fail` (Core strict policy) |"
-            echo "| False-clean dogfood admission | `blocked` |"
-            echo "| Tampered evidence | `binding failure / blocked` |"
-            echo "| Core promotion gate | `CORE_CHANGE_VERIFIED` |"
+            echo "| Producer PR head | \`$PRODUCER_PR_HEAD_SHA\` |"
+            echo "| Core Gate | \`$GATE_SHA\` |"
+            echo "| Producer verdict | \`clean\` |"
+            echo "| Producer findings | \`0\` |"
+            echo "| Producer execution | \`complete\` |"
+            echo "| False-clean Core decision | \`fail\` (Core strict policy) |"
+            echo "| False-clean dogfood admission | \`blocked\` |"
+            echo "| Tampered evidence | \`binding failure / blocked\` |"
+            echo "| Core promotion gate | \`CORE_CHANGE_VERIFIED\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Producer-generated acceptance evidence

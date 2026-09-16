@@ -339,6 +339,16 @@ jobs:
             --out "$RUNNER_TEMP/producer-out"
         working-directory: ${{ runner.temp }}/producer
 
+      - name: Run remote Core Action on promoted-main clean evidence
+        id: remote_clean
+        continue-on-error: true
+        uses: Xander-Xai/mcp-evidence-gate@b8e39635350929e93d4f302d423ea551cd7da763
+        with:
+          receipt: ${{ runner.temp }}/producer-out/receipt.json
+          artifact: evidence/real-trivy/clean/requirements.txt
+          evidence: ${{ runner.temp }}/producer-out/evidence.json
+          policy: strict-scanner-completeness
+
       - name: Build immutable Core Gate
         shell: bash
         run: |
@@ -400,6 +410,17 @@ jobs:
       - name: Assert Producer-generated acceptance and Core promotion gate
         env:
           CLEAN_CORE_CODE: ${{ steps.clean_core.outputs.code }}
+          REMOTE_CLEAN_OUTCOME: ${{ steps.remote_clean.outcome }}
+          REMOTE_CLEAN_DECISION: ${{ steps.remote_clean.outputs.decision }}
+          REMOTE_CLEAN_RECEIPT_VERDICT: ${{ steps.remote_clean.outputs['receipt-verdict'] }}
+          REMOTE_CLEAN_PROFILE: ${{ steps.remote_clean.outputs.profile }}
+          REMOTE_CLEAN_INTEGRITY_STATUS: ${{ steps.remote_clean.outputs['integrity-status'] }}
+          REMOTE_CLEAN_RECEIPT_STATUS: ${{ steps.remote_clean.outputs['receipt-status'] }}
+          REMOTE_CLEAN_POLICY_STATUS: ${{ steps.remote_clean.outputs['policy-status'] }}
+          REMOTE_CLEAN_ADMISSION_STATUS: ${{ steps.remote_clean.outputs['admission-status'] }}
+          REMOTE_CLEAN_SCANNER_EXECUTION_STATUS: ${{ steps.remote_clean.outputs['scanner-execution-status'] }}
+          REMOTE_CLEAN_REASON_CODES: ${{ steps.remote_clean.outputs['reason-codes'] }}
+          REMOTE_CLEAN_POLICY_VERSION: ${{ steps.remote_clean.outputs['policy-version'] }}
         shell: bash
         run: |
           set -euo pipefail
@@ -435,6 +456,18 @@ jobs:
           assert clean_core["admission_status"] == "pass"
           assert clean_core["scanner_execution_status"] == "complete"
           assert int(os.environ["CLEAN_CORE_CODE"]) == 0
+
+          assert os.environ["REMOTE_CLEAN_OUTCOME"] == "success"
+          assert os.environ["REMOTE_CLEAN_DECISION"] == clean_core["decision"] == "pass"
+          assert os.environ["REMOTE_CLEAN_RECEIPT_VERDICT"] == clean_core["receiptVerdict"] == receipt["verdict"] == "clean"
+          assert os.environ["REMOTE_CLEAN_PROFILE"] == clean_core["profile"]
+          assert os.environ["REMOTE_CLEAN_INTEGRITY_STATUS"] == clean_core["integrity_status"] == "pass"
+          assert os.environ["REMOTE_CLEAN_RECEIPT_STATUS"] == clean_core["receipt_status"] == "valid"
+          assert os.environ["REMOTE_CLEAN_POLICY_STATUS"] == clean_core["policy_status"] == "pass"
+          assert os.environ["REMOTE_CLEAN_ADMISSION_STATUS"] == clean_core["admission_status"] == "pass"
+          assert os.environ["REMOTE_CLEAN_SCANNER_EXECUTION_STATUS"] == clean_core["scanner_execution_status"] == "complete"
+          assert os.environ["REMOTE_CLEAN_REASON_CODES"] == ",".join(clean_core["reason_codes"])
+          assert os.environ["REMOTE_CLEAN_POLICY_VERSION"] == clean_core["policy_version"]
 
           policy_results = {}
           core_results = {}
@@ -477,6 +510,19 @@ jobs:
               "producer_finding_count": finding_count,
               "producer_scanner_execution": evidence["scanner_execution"],
               "clean_core_decision": clean_core["decision"],
+              "remote_action": {
+                  "outcome": os.environ["REMOTE_CLEAN_OUTCOME"],
+                  "decision": os.environ["REMOTE_CLEAN_DECISION"],
+                  "receipt_verdict": os.environ["REMOTE_CLEAN_RECEIPT_VERDICT"],
+                  "profile": os.environ["REMOTE_CLEAN_PROFILE"],
+                  "integrity_status": os.environ["REMOTE_CLEAN_INTEGRITY_STATUS"],
+                  "receipt_status": os.environ["REMOTE_CLEAN_RECEIPT_STATUS"],
+                  "policy_status": os.environ["REMOTE_CLEAN_POLICY_STATUS"],
+                  "admission_status": os.environ["REMOTE_CLEAN_ADMISSION_STATUS"],
+                  "scanner_execution_status": os.environ["REMOTE_CLEAN_SCANNER_EXECUTION_STATUS"],
+                  "reason_codes": os.environ["REMOTE_CLEAN_REASON_CODES"],
+                  "policy_version": os.environ["REMOTE_CLEAN_POLICY_VERSION"],
+              },
               "false_clean": {
                   "policy": policy_results["false-clean"],
                   "core": core_results["false-clean"],
@@ -504,6 +550,7 @@ jobs:
             echo "| Producer verdict | \`clean\` |"
             echo "| Producer findings | \`0\` |"
             echo "| Producer execution | \`complete\` |"
+            echo "| Remote Core Action | \`pass / complete\` (strict policy) |"
             echo "| False-clean Core decision | \`fail\` (Core strict policy) |"
             echo "| False-clean dogfood admission | \`blocked\` |"
             echo "| Tampered evidence | \`binding failure / blocked\` |"

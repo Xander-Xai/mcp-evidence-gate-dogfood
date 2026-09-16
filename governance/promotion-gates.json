@@ -49,6 +49,8 @@
       "uses": "Xander-Xai/mcp-evidence-gate@b8e39635350929e93d4f302d423ea551cd7da763",
       "fixture": "evidence/clean/evidence-match-receipt.json + evidence/clean/evidence-report.json",
       "comparison": "remote Action versus bundled Action at the same Core commit",
+      "promoted_main_strict_fixture": "producer-generated evidence/real-trivy/clean/requirements.txt",
+      "promoted_main_strict_expected": "pass / valid / pass / pass / complete",
       "required_outputs": [
         "decision",
         "receipt-verdict",

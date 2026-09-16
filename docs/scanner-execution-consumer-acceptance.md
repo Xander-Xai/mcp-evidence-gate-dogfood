@@ -95,10 +95,13 @@ and scanner functions for P1 and invokes Core's built CLI for P2.
 
 ## Producer-generated acceptance
 
-The workflow invokes the pinned Producer against the consumer-owned
+The workflow invokes promoted Producer `main` against the consumer-owned
 `evidence/real-trivy/clean/requirements.txt`, retains `receipt.json`,
 `evidence.json`, `trivy.raw.json`, and the scanner-execution record, then runs
-the immutable Core CLI. A deterministic derivation changes only the
+the remote Core Action at the exact SHA with `strict-scanner-completeness`
+(`decision=pass`, `integrity-status=pass`, `receipt-status=valid`, and
+`scanner-execution-status=complete`) and compares it with the immutable Core
+CLI. A deterministic derivation changes only the
 Producer-generated execution record to create:
 
 1. a self-consistent clean receipt with failed scanner execution; and

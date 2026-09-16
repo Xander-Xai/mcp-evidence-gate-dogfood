@@ -32,6 +32,11 @@ consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_co
 an evidence file must be digest-bound and have complete required execution
 evidence before it is eligible for Core Gate evaluation.
 
+The producer-generated clean job also sends that promoted-main output through
+the remote Core Action with `strict-scanner-completeness` and asserts
+`decision=pass`, `integrity-status=pass`, `receipt-status=valid`, and
+`scanner-execution-status=complete` against the bundled CLI result.
+
 [`scanner-completeness-consumer.yml`](.github/workflows/scanner-completeness-consumer.yml)
 executes complete-clean, complete-findings, incomplete/failed zero-findings,
 missing/malformed/contradictory completeness, evidence-tampering, and a

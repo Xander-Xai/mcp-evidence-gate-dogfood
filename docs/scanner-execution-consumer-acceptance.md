@@ -88,10 +88,24 @@ database snapshot boundary while requiring complete execution evidence.
 
 ## Exact-head validation record
 
-The final dogfood PR head and exact workflow run IDs are recorded here after
-GitHub Actions completes. Until then the external-runtime predicate is
-`PENDING`; local deterministic tests do not substitute for hosted runtime
-evidence.
+Final dogfood PR head: `14c09fcd2f9f0b1d9c72525a704eb26c06b4778c`.
+All listed runs targeted that exact SHA and completed successfully:
+
+- [Scanner Completeness Consumer Acceptance](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501543)
+  — seven deterministic matrix jobs plus `producer-generated acceptance`.
+- [MCP Evidence Gate Dogfood promotion](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501689)
+  — promotion gate and all required real/non-regression consumers.
+- [Real Trivy Producer Consumer](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501521)
+  — exact-head Trivy consumer.
+- [Real OSV Producer Consumer](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501500)
+  — exact-head OSV consumer.
+- [Real OCI Exact Identity](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501503)
+  — exact-head OCI identity consumer.
+- [Real Multi-Receipt Composition](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501525)
+  — exact-head multi-receipt consumer.
+
+The hosted external-runtime predicate is therefore `PASS`; local tests remain
+supporting evidence rather than a substitute for these runs.
 
 ## Core promotion gate
 

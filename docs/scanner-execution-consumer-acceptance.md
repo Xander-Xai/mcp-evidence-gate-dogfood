@@ -10,14 +10,15 @@ MCP Registry receipt schema or the Core Gate implementation.
 - Promoted Producer `main`: `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` (CURRENT).
 - Producer PR #4 pre-merge head: `575a1230290b610297152e44dc6dd5b6ac6c04e9` (SUPERSEDED AS ACTIVE IDENTITY).
 - Producer baseline `main`: `4c4d9bd476396cd7e34e9d4182900ac00b03d17b`.
-- Core Gate PR #14 exact head: `b8e39635350929e93d4f302d423ea551cd7da763` (CURRENT).
+- Core promoted `main`: `1c5a6cfae2901b97fc0925d0b102710d9a73cb82` (CURRENT).
+- Core PR #14 pre-merge accepted head: `b8e39635350929e93d4f302d423ea551cd7da763` (PRE_MERGE_ACCEPTED_CORE_HEAD; SUPERSEDED AS ACTIVE IDENTITY).
 - Previous Core acceptance: `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` (SUPERSEDED).
 - Previous Dogfood acceptance head: `a431faf84bd69a0d4ad79731ad8e7c29880c690e` (SUPERSEDED).
 - Registry compatibility profile (unchanged):
   `registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22`.
 
-The workflows use the remote Core Action directly at
-`Xander-Xai/mcp-evidence-gate@b8e39635350929e93d4f302d423ea551cd7da763` and,
+The workflows use the promoted Core `main` Action directly at
+`Xander-Xai/mcp-evidence-gate@1c5a6cfae2901b97fc0925d0b102710d9a73cb82` and,
 on the same fixture, compare it with the bundled `dist/action/index.cjs` from
 that exact checkout. The remote job asserts `REMOTE_ACTION_LOAD=PASS`, every
 declared Action output, and equality of the remote and bundled decisions,
@@ -78,7 +79,7 @@ than manufacturing a clean verdict.
 ## External Core P1/P2 acceptance
 
 `scripts/run_core_snapshot_acceptance.mjs` checks the exact built Core commit
-`b8e39635350929e93d4f302d423ea551cd7da763` from an external consumer. P1
+`1c5a6cfae2901b97fc0925d0b102710d9a73cb82` from an external consumer. P1
 injects a reader that would return bytes A and then B, and asserts Core reads
 once and verifies the detached A snapshot for both binding and scanner
 semantics. P2 invokes the Core CLI boundary surface for:
@@ -137,7 +138,7 @@ Existing real OCI workflow assertions continue to require root index digest,
 selected platform descriptor, exact platform manifest bytes, selected digest
 binding, and complete scanner execution while checking out Producer
 `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` and Core
-`b8e39635350929e93d4f302d423ea551cd7da763`. Existing OSV workflow assertions
+`1c5a6cfae2901b97fc0925d0b102710d9a73cb82`. Existing OSV workflow assertions
 keep exit 0/1, package/source/lockfile, raw-result consistency, and the
 unavailable database snapshot boundary while requiring complete execution
 evidence; its additional source-binding mismatch job is a P2 negative
@@ -154,10 +155,10 @@ are retained as historical evidence and are `SUPERSEDED` because they used
 Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` and did not include the
 `Results=[]` or OSV `source_binding` acceptance.
 
-The current acceptance is tied to the final Dogfood commit and the fresh
+The current acceptance is tied to the new Dogfood commit and the fresh
 workflow run/job IDs recorded in PR #12. Those runs must all target the same
-final Dogfood head, promoted Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`,
-and Core `b8e39635350929e93d4f302d423ea551cd7da763`; local tests are supporting
+new Dogfood head, promoted Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`,
+and Core `1c5a6cfae2901b97fc0925d0b102710d9a73cb82`; local tests are supporting
 evidence rather than a substitute for the hosted run. The prior Dogfood head
 `a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are
 `SUPERSEDED`.
@@ -166,7 +167,7 @@ evidence rather than a substitute for the hosted run. The prior Dogfood head
 
 `CORE_CHANGE_VERIFIED = YES`.
 
-At Core `b8e39635350929e93d4f302d423ea551cd7da763`, strict-scanner-completeness
+At Core `1c5a6cfae2901b97fc0925d0b102710d9a73cb82`, strict-scanner-completeness
 evaluation returns `pass` only for complete-clean evidence. A digest-bound
 false-clean, a Producer `Results=[]` receipt, and an OSV source-binding
 mismatch all return Core `fail` with scanner execution incomplete; the Dogfood

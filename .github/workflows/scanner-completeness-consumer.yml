@@ -19,7 +19,7 @@ permissions:
 env:
   PRODUCER_PR_HEAD_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
   PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
-  GATE_SHA: d5abcdc28d6e288da15ec69b16901ec604da5617
+  GATE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
 
 jobs:
   deterministic-scanner-completeness:
@@ -47,29 +47,36 @@ jobs:
             expected_policy_code: 2
             expected_policy_admission: blocked
             expected_integrity: pass
-            expected_core_code: 0
-            expected_core_decision: pass
+            expected_core_code: 1
+            expected_core_decision: fail
             expected_overall: blocked
           - name: failed-zero-findings
             expected_policy_code: 2
             expected_policy_admission: blocked
             expected_integrity: pass
-            expected_core_code: 0
-            expected_core_decision: pass
+            expected_core_code: 1
+            expected_core_decision: fail
             expected_overall: blocked
           - name: missing-completeness
             expected_policy_code: 2
             expected_policy_admission: blocked
             expected_integrity: pass
-            expected_core_code: 0
-            expected_core_decision: pass
+            expected_core_code: 1
+            expected_core_decision: fail
             expected_overall: blocked
           - name: malformed-completeness
             expected_policy_code: 2
             expected_policy_admission: blocked
             expected_integrity: pass
-            expected_core_code: 0
-            expected_core_decision: pass
+            expected_core_code: 1
+            expected_core_decision: fail
+            expected_overall: blocked
+          - name: contradictory-complete
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: pass
+            expected_core_code: 1
+            expected_core_decision: fail
             expected_overall: blocked
           - name: tampered-evidence
             expected_policy_code: 2
@@ -132,7 +139,7 @@ jobs:
             --receipt "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/receipt.json" \
             --artifact "$GITHUB_WORKSPACE/dist/example-artifact.bin" \
             --evidence "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/evidence.json" \
-            --policy permissive \
+            --policy strict-scanner-completeness \
             --format json \
             --now 2026-09-17T00:00:00Z \
             > "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/core.json"
@@ -173,6 +180,21 @@ jobs:
           assert policy["admission"] == os.environ["EXPECTED_POLICY_ADMISSION"]
           assert policy["integrity"] == os.environ["EXPECTED_INTEGRITY"]
           assert core["decision"] == os.environ["EXPECTED_CORE_DECISION"]
+          assert core["policy"] == "strict-scanner-completeness"
+          assert core["integrity_status"] == os.environ["EXPECTED_INTEGRITY"]
+          assert core["policy_status"] == os.environ["EXPECTED_CORE_DECISION"]
+          assert core["admission_status"] == os.environ["EXPECTED_CORE_DECISION"]
+          expected_scanner_status = {
+              "complete-clean": "complete",
+              "complete-findings": "complete",
+              "incomplete-zero-findings": "incomplete",
+              "failed-zero-findings": "failed",
+              "missing-completeness": "missing",
+              "malformed-completeness": "malformed",
+              "contradictory-complete": "contradictory",
+              "tampered-evidence": "unverified",
+          }["${{ matrix.name }}"]
+          assert core["scanner_execution_status"] == expected_scanner_status
           if os.environ["EXPECTED_OVERALL"] == "pass":
               assert policy["admission"] == "eligible_for_gate"
               assert core["decision"] == "pass"
@@ -283,7 +305,7 @@ jobs:
             --receipt "$RUNNER_TEMP/producer-out/receipt.json" \
             --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
             --evidence "$RUNNER_TEMP/producer-out/evidence.json" \
-            --policy permissive --format json --now 2026-09-17T00:00:00Z \
+            --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z \
             > "$RUNNER_TEMP/producer-clean-core.json"
           code=$?
           set -e
@@ -316,7 +338,7 @@ jobs:
               --receipt "$RUNNER_TEMP/producer-adversarial/$name/receipt.json" \
               --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
               --evidence "$RUNNER_TEMP/producer-adversarial/$name/evidence.json" \
-              --policy permissive --format json --now 2026-09-17T00:00:00Z \
+              --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z \
               > "$RUNNER_TEMP/producer-adversarial/$name/core.json"
             echo "$name=$?" >> "$RUNNER_TEMP/producer-adversarial/core-exit-codes"
           done
@@ -353,6 +375,12 @@ jobs:
           assert evidence["scanner_execution"]["completeness_status"] == "complete"
           assert evidence["scanner_execution"]["required_work_completed"] is True
           assert clean_core["decision"] == "pass"
+          assert clean_core["policy"] == "strict-scanner-completeness"
+          assert clean_core["integrity_status"] == "pass"
+          assert clean_core["receipt_status"] == "valid"
+          assert clean_core["policy_status"] == "pass"
+          assert clean_core["admission_status"] == "pass"
+          assert clean_core["scanner_execution_status"] == "complete"
           assert int(os.environ["CLEAN_CORE_CODE"]) == 0
 
           policy_results = {}
@@ -366,12 +394,18 @@ jobs:
           assert policy_results["false-clean"]["admission"] == "blocked"
           assert policy_results["false-clean"]["scanner_execution"]["status"] == "failed"
           assert int(policy_codes["false-clean"]) == 2
-          assert core_results["false-clean"]["decision"] == "pass"
-          assert int(core_codes["false-clean"]) == 0
+          assert core_results["false-clean"]["decision"] == "fail"
+          assert core_results["false-clean"]["integrity_status"] == "pass"
+          assert core_results["false-clean"]["scanner_execution_status"] == "failed"
+          assert "scanner_execution_failed" in core_results["false-clean"]["reason_codes"]
+          assert int(core_codes["false-clean"]) == 1
           assert policy_results["tampered"]["integrity"] == "inconclusive"
           assert policy_results["tampered"]["admission"] == "blocked"
           assert int(policy_codes["tampered"]) == 2
           assert core_results["tampered"]["decision"] == "inconclusive"
+          assert core_results["tampered"]["integrity_status"] == "inconclusive"
+          assert core_results["tampered"]["scanner_execution_status"] == "unverified"
+          assert "evidence_digest_mismatch" in core_results["tampered"]["reason_codes"]
           assert int(core_codes["tampered"]) == 2
 
           def digest(path: Path) -> str:
@@ -401,8 +435,8 @@ jobs:
                   "overall_admission": "blocked",
               },
               "core_promotion_gate": {
-                  "decision": "CORE_CHANGE_REQUIRED",
-                  "reason": "Core accepts digest-bound project evidence without interpreting scanner_execution; dogfood policy blocks the resulting false-clean admission.",
+                  "decision": "CORE_CHANGE_VERIFIED",
+                  "reason": "Core strict-scanner-completeness policy blocks the digest-bound false-clean execution while preserving complete-clean eligibility.",
               },
           }
           manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -417,10 +451,10 @@ jobs:
             echo "| Producer verdict | `clean` |"
             echo "| Producer findings | `0` |"
             echo "| Producer execution | `complete` |"
-            echo "| False-clean Core decision | `pass` (gap evidence) |"
+            echo "| False-clean Core decision | `fail` (Core strict policy) |"
             echo "| False-clean dogfood admission | `blocked` |"
             echo "| Tampered evidence | `binding failure / blocked` |"
-            echo "| Core promotion gate | `CORE_CHANGE_REQUIRED` |"
+            echo "| Core promotion gate | `CORE_CHANGE_VERIFIED` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Producer-generated acceptance evidence

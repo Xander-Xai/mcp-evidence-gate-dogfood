@@ -119,6 +119,9 @@ def build_cases(destination: Path) -> None:
         **_complete_execution(),
         "completeness_status": "not-a-valid-status",
     }, raw_bytes=raw_bytes)
+    contradictory = _complete_execution()
+    contradictory["process_completed"] = False
+    _materialize_case(destination / "contradictory-complete", base_receipt, base_evidence, contradictory, raw_bytes=raw_bytes)
     _materialize_case(destination / "tampered-evidence", base_receipt, base_evidence, _complete_execution(), raw_bytes=raw_bytes, tamper_after_binding=True)
 
 

@@ -1,0 +1,440 @@
+name: Scanner Completeness Consumer Acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/scanner-completeness-consumer.yml
+      - scripts/build_scanner_completeness_cases.py
+      - scripts/derive_producer_adversarial_cases.py
+      - scripts/scanner_completeness_policy.py
+      - evidence/scanner-completeness/**
+      - evidence/real-trivy/clean/requirements.txt
+      - dist/example-artifact.bin
+
+permissions:
+  contents: read
+
+env:
+  PRODUCER_PR_HEAD_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
+  PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
+  GATE_SHA: d5abcdc28d6e288da15ec69b16901ec604da5617
+
+jobs:
+  deterministic-scanner-completeness:
+    name: deterministic (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: complete-clean
+            expected_policy_code: 0
+            expected_policy_admission: eligible_for_gate
+            expected_integrity: pass
+            expected_core_code: 0
+            expected_core_decision: pass
+            expected_overall: pass
+          - name: complete-findings
+            expected_policy_code: 0
+            expected_policy_admission: eligible_for_gate
+            expected_integrity: pass
+            expected_core_code: 1
+            expected_core_decision: fail
+            expected_overall: blocked
+          - name: incomplete-zero-findings
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: pass
+            expected_core_code: 0
+            expected_core_decision: pass
+            expected_overall: blocked
+          - name: failed-zero-findings
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: pass
+            expected_core_code: 0
+            expected_core_decision: pass
+            expected_overall: blocked
+          - name: missing-completeness
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: pass
+            expected_core_code: 0
+            expected_core_decision: pass
+            expected_overall: blocked
+          - name: malformed-completeness
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: pass
+            expected_core_code: 0
+            expected_core_decision: pass
+            expected_overall: blocked
+          - name: tampered-evidence
+            expected_policy_code: 2
+            expected_policy_admission: blocked
+            expected_integrity: inconclusive
+            expected_core_code: 2
+            expected_core_decision: inconclusive
+            expected_overall: blocked
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Materialize deterministic Producer-schema cases
+        shell: bash
+        run: python scripts/build_scanner_completeness_cases.py "$RUNNER_TEMP/scanner-completeness-cases"
+
+      - name: Build immutable Core Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$GATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$GATE_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+
+      - name: Evaluate dogfood scanner-completeness policy
+        id: policy
+        shell: bash
+        run: |
+          set +e
+          python scripts/scanner_completeness_policy.py \
+            --receipt "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/receipt.json" \
+            --evidence "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/evidence.json" \
+            --artifact "$GITHUB_WORKSPACE/dist/example-artifact.bin" \
+            > "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/policy.json"
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Verify immutable Core result
+        id: core
+        shell: bash
+        run: |
+          set +e
+          node "$RUNNER_TEMP/core/dist/cli.js" verify \
+            --receipt "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/receipt.json" \
+            --artifact "$GITHUB_WORKSPACE/dist/example-artifact.bin" \
+            --evidence "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/evidence.json" \
+            --policy permissive \
+            --format json \
+            --now 2026-09-17T00:00:00Z \
+            > "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/core.json"
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Assert integrity, Core behavior, and final admission
+        env:
+          EXPECTED_POLICY_CODE: ${{ matrix.expected_policy_code }}
+          EXPECTED_POLICY_ADMISSION: ${{ matrix.expected_policy_admission }}
+          EXPECTED_INTEGRITY: ${{ matrix.expected_integrity }}
+          EXPECTED_CORE_CODE: ${{ matrix.expected_core_code }}
+          EXPECTED_CORE_DECISION: ${{ matrix.expected_core_decision }}
+          EXPECTED_OVERALL: ${{ matrix.expected_overall }}
+          POLICY_CODE: ${{ steps.policy.outputs.code }}
+          CORE_CODE: ${{ steps.core.outputs.code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - \
+            "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/policy.json" \
+            "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/core.json" \
+            "$RUNNER_TEMP/scanner-completeness-cases/${{ matrix.name }}/retained.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          policy_path, core_path, retained_path = map(Path, sys.argv[1:])
+          policy = json.loads(policy_path.read_text(encoding="utf-8"))
+          core = json.loads(core_path.read_text(encoding="utf-8"))
+          expected_policy_code = int(os.environ["EXPECTED_POLICY_CODE"])
+          expected_core_code = int(os.environ["EXPECTED_CORE_CODE"])
+          assert int(os.environ["POLICY_CODE"]) == expected_policy_code
+          assert int(os.environ["CORE_CODE"]) == expected_core_code
+          assert policy["admission"] == os.environ["EXPECTED_POLICY_ADMISSION"]
+          assert policy["integrity"] == os.environ["EXPECTED_INTEGRITY"]
+          assert core["decision"] == os.environ["EXPECTED_CORE_DECISION"]
+          if os.environ["EXPECTED_OVERALL"] == "pass":
+              assert policy["admission"] == "eligible_for_gate"
+              assert core["decision"] == "pass"
+          else:
+              assert not (policy["admission"] == "eligible_for_gate" and core["decision"] == "pass")
+
+          retained = {
+              "schema_version": "dogfood-scanner-completeness-runtime-evidence-v1",
+              "case": "${{ matrix.name }}",
+              "producer_pr_head": os.environ["PRODUCER_PR_HEAD_SHA"],
+              "producer_baseline_main": os.environ["PRODUCER_BASELINE_MAIN_SHA"],
+              "gate_sha": os.environ["GATE_SHA"],
+              "policy": policy,
+              "policy_exit_code": int(os.environ["POLICY_CODE"]),
+              "core": core,
+              "core_exit_code": int(os.environ["CORE_CODE"]),
+              "expected_overall": os.environ["EXPECTED_OVERALL"],
+          }
+          retained_path.write_text(json.dumps(retained, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          {
+            echo "## Deterministic scanner completeness: ${{ matrix.name }}"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Producer PR head | `$PRODUCER_PR_HEAD_SHA` |"
+            echo "| Core Gate | `$GATE_SHA` |"
+            echo "| Policy admission | `${{ matrix.expected_policy_admission }}` |"
+            echo "| Core decision | `${{ matrix.expected_core_decision }}` |"
+            echo "| Overall admission | `${{ matrix.expected_overall }}` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deterministic acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: scanner-completeness-deterministic-${{ matrix.name }}-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/scanner-completeness-cases/${{ matrix.name }}
+
+  producer-generated-acceptance:
+    name: producer-generated acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Download and verify pinned Trivy
+        shell: bash
+        env:
+          TRIVY_VERSION: 0.74.0
+          TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+          TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tar.gz" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_ARCHIVE_SHA256}  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP"
+          echo "${TRIVY_EXECUTABLE_SHA256}  $RUNNER_TEMP/trivy" | sha256sum --check --strict
+          test "$("$RUNNER_TEMP/trivy" --version | sed -n 's/^Version: //p')" = "$TRIVY_VERSION"
+
+      - name: Check out immutable Producer PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_PR_HEAD_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_PR_HEAD_SHA"
+
+      - name: Run real Producer on consumer-owned clean candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.producer \
+            --trivy "$RUNNER_TEMP/trivy" \
+            --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
+            --out "$RUNNER_TEMP/producer-out"
+        working-directory: ${{ runner.temp }}/producer
+
+      - name: Build immutable Core Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$GATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$GATE_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+
+      - name: Verify Producer-generated clean evidence with Core
+        id: clean_core
+        shell: bash
+        run: |
+          set +e
+          node "$RUNNER_TEMP/core/dist/cli.js" verify \
+            --receipt "$RUNNER_TEMP/producer-out/receipt.json" \
+            --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
+            --evidence "$RUNNER_TEMP/producer-out/evidence.json" \
+            --policy permissive --format json --now 2026-09-17T00:00:00Z \
+            > "$RUNNER_TEMP/producer-clean-core.json"
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Derive Producer-generated false-clean and tampered cases
+        run: python scripts/derive_producer_adversarial_cases.py --producer-out "$RUNNER_TEMP/producer-out" --destination "$RUNNER_TEMP/producer-adversarial"
+
+      - name: Evaluate false-clean and tampered cases with dogfood policy
+        shell: bash
+        run: |
+          set +e
+          for name in false-clean tampered; do
+            python scripts/scanner_completeness_policy.py \
+              --receipt "$RUNNER_TEMP/producer-adversarial/$name/receipt.json" \
+              --evidence "$RUNNER_TEMP/producer-adversarial/$name/evidence.json" \
+              --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
+              > "$RUNNER_TEMP/producer-adversarial/$name/policy.json"
+            echo "$name=$?" >> "$RUNNER_TEMP/producer-adversarial/policy-exit-codes"
+          done
+          set -e
+
+      - name: Verify false-clean and tampered cases with Core
+        shell: bash
+        run: |
+          set +e
+          for name in false-clean tampered; do
+            node "$RUNNER_TEMP/core/dist/cli.js" verify \
+              --receipt "$RUNNER_TEMP/producer-adversarial/$name/receipt.json" \
+              --artifact "$GITHUB_WORKSPACE/evidence/real-trivy/clean/requirements.txt" \
+              --evidence "$RUNNER_TEMP/producer-adversarial/$name/evidence.json" \
+              --policy permissive --format json --now 2026-09-17T00:00:00Z \
+              > "$RUNNER_TEMP/producer-adversarial/$name/core.json"
+            echo "$name=$?" >> "$RUNNER_TEMP/producer-adversarial/core-exit-codes"
+          done
+          set -e
+
+      - name: Assert Producer-generated acceptance and Core promotion gate
+        env:
+          CLEAN_CORE_CODE: ${{ steps.clean_core.outputs.code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - \
+            "$RUNNER_TEMP/producer-out" \
+            "$RUNNER_TEMP/producer-clean-core.json" \
+            "$RUNNER_TEMP/producer-adversarial" \
+            "$RUNNER_TEMP/producer-acceptance-manifest.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          producer_out, clean_core_path, adversarial, manifest_path = map(Path, sys.argv[1:])
+          receipt = json.loads((producer_out / "receipt.json").read_text(encoding="utf-8"))
+          evidence = json.loads((producer_out / "evidence.json").read_text(encoding="utf-8"))
+          raw = json.loads((producer_out / "trivy.raw.json").read_text(encoding="utf-8"))
+          clean_core = json.loads(clean_core_path.read_text(encoding="utf-8"))
+          policy_codes = dict(line.strip().split("=", 1) for line in (adversarial / "policy-exit-codes").read_text(encoding="utf-8").splitlines() if line.strip())
+          core_codes = dict(line.strip().split("=", 1) for line in (adversarial / "core-exit-codes").read_text(encoding="utf-8").splitlines() if line.strip())
+
+          finding_count = sum(len(row.get("Vulnerabilities") or []) for row in raw.get("Results", []))
+          assert receipt["verdict"] == "clean"
+          assert finding_count == 0
+          assert evidence["scanner_execution"]["completeness_status"] == "complete"
+          assert evidence["scanner_execution"]["required_work_completed"] is True
+          assert clean_core["decision"] == "pass"
+          assert int(os.environ["CLEAN_CORE_CODE"]) == 0
+
+          policy_results = {}
+          core_results = {}
+          for name in ("false-clean", "tampered"):
+              policy = json.loads((adversarial / name / "policy.json").read_text(encoding="utf-8"))
+              core = json.loads((adversarial / name / "core.json").read_text(encoding="utf-8"))
+              policy_results[name] = policy
+              core_results[name] = core
+          assert policy_results["false-clean"]["integrity"] == "pass"
+          assert policy_results["false-clean"]["admission"] == "blocked"
+          assert policy_results["false-clean"]["scanner_execution"]["status"] == "failed"
+          assert int(policy_codes["false-clean"]) == 2
+          assert core_results["false-clean"]["decision"] == "pass"
+          assert int(core_codes["false-clean"]) == 0
+          assert policy_results["tampered"]["integrity"] == "inconclusive"
+          assert policy_results["tampered"]["admission"] == "blocked"
+          assert int(policy_codes["tampered"]) == 2
+          assert core_results["tampered"]["decision"] == "inconclusive"
+          assert int(core_codes["tampered"]) == 2
+
+          def digest(path: Path) -> str:
+              return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+          manifest = {
+              "schema_version": "dogfood-scanner-completeness-producer-runtime-v1",
+              "producer_pr_head": os.environ["PRODUCER_PR_HEAD_SHA"],
+              "producer_baseline_main": os.environ["PRODUCER_BASELINE_MAIN_SHA"],
+              "gate_sha": os.environ["GATE_SHA"],
+              "artifact": "evidence/real-trivy/clean/requirements.txt",
+              "producer_receipt_digest": digest(producer_out / "receipt.json"),
+              "producer_evidence_digest": digest(producer_out / "evidence.json"),
+              "producer_raw_digest": digest(producer_out / "trivy.raw.json"),
+              "producer_verdict": receipt["verdict"],
+              "producer_finding_count": finding_count,
+              "producer_scanner_execution": evidence["scanner_execution"],
+              "clean_core_decision": clean_core["decision"],
+              "false_clean": {
+                  "policy": policy_results["false-clean"],
+                  "core": core_results["false-clean"],
+                  "overall_admission": "blocked",
+              },
+              "tampered": {
+                  "policy": policy_results["tampered"],
+                  "core": core_results["tampered"],
+                  "overall_admission": "blocked",
+              },
+              "core_promotion_gate": {
+                  "decision": "CORE_CHANGE_REQUIRED",
+                  "reason": "Core accepts digest-bound project evidence without interpreting scanner_execution; dogfood policy blocks the resulting false-clean admission.",
+              },
+          }
+          manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          {
+            echo "## Producer-generated scanner completeness acceptance"
+            echo
+            echo "| Field | Runtime value |"
+            echo "| --- | --- |"
+            echo "| Producer PR head | `$PRODUCER_PR_HEAD_SHA` |"
+            echo "| Core Gate | `$GATE_SHA` |"
+            echo "| Producer verdict | `clean` |"
+            echo "| Producer findings | `0` |"
+            echo "| Producer execution | `complete` |"
+            echo "| False-clean Core decision | `pass` (gap evidence) |"
+            echo "| False-clean dogfood admission | `blocked` |"
+            echo "| Tampered evidence | `binding failure / blocked` |"
+            echo "| Core promotion gate | `CORE_CHANGE_REQUIRED` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Producer-generated acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: scanner-completeness-producer-runtime-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/producer-acceptance-manifest.json
+            ${{ runner.temp }}/producer-clean-core.json
+            ${{ runner.temp }}/producer-out/receipt.json
+            ${{ runner.temp }}/producer-out/evidence.json
+            ${{ runner.temp }}/producer-out/trivy.raw.json
+            ${{ runner.temp }}/producer-out/trivy.stderr.log
+            ${{ runner.temp }}/producer-adversarial

@@ -15,7 +15,7 @@ jobs:
   real-osv-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 3a65d011e21efab79d758ec9b82b788ece5cfe6a
+      PRODUCER_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
       GATE_SHA: f736023aa23c48e9f667325f84282c8546c4aa57
       OSV_VERSION: 2.5.1
       OSV_EXECUTABLE_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
@@ -94,6 +94,11 @@ jobs:
           assert evidence["scanner"]["name"] == "osv-scanner"
           assert evidence["scanner"]["version"] == os.environ["OSV_VERSION"]
           assert evidence["scanner"]["binary_sha256"] == os.environ["OSV_EXECUTABLE_SHA256"]
+          execution = evidence["scanner_execution"]
+          assert execution["schema_version"] == "project-defined-scanner-execution-v1"
+          assert execution["completeness_status"] == "complete"
+          assert execution["required_work_completed"] is True
+          assert execution["result_semantics_consistent"] is True
           assert evidence["scanner_database"]["source"] == "https://osv.dev"
           assert evidence["scanner_database"]["mode"] == "remote-query"
           assert evidence["scanner_database"]["snapshot"] == "unavailable"
@@ -121,6 +126,7 @@ jobs:
               "receipt_verdict": receipt_verdict,
               "scanner_exit_code": int(scanner_exit),
               "source_types": sorted(observed_source_types),
+              "scanner_execution": evidence["scanner_execution"],
               "scanner_database": evidence["scanner_database"],
           }
           with open(manifest_path, "w", encoding="utf-8") as f:
@@ -196,6 +202,7 @@ jobs:
             echo "| Source types | \`${{ steps.facts.outputs.source_types }}\` |"
             echo "| DB snapshot | \`unavailable\` |"
             echo "| Receipt verdict | \`$PRODUCER_VERDICT\` |"
+            echo "| Scanner execution | \`complete\` |"
             echo "| Gate decision | \`$ACTUAL_DECISION\` |"
             echo "| Gate step outcome | \`$ACTUAL_OUTCOME\` |"
           } >> "$GITHUB_STEP_SUMMARY"

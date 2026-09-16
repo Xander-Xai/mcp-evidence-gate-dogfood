@@ -15,7 +15,7 @@ jobs:
   real-trivy-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: c831705f6aed062127ca4a72ba82c738831e49d4
+      PRODUCER_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
       GATE_SHA: d404b38f0ac0303438b561fe7358b0eec487c962
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
@@ -87,6 +87,11 @@ jobs:
           assert evidence["raw_report"]["sha256"] == raw_report_digest.removeprefix("sha256:")
           assert evidence["scanner"]["name"] == "trivy"
           assert evidence["scanner"]["version"] == "0.74.0"
+          execution = evidence["scanner_execution"]
+          assert execution["schema_version"] == "project-defined-scanner-execution-v1"
+          assert execution["completeness_status"] == "complete"
+          assert execution["required_work_completed"] is True
+          assert execution["result_semantics_consistent"] is True
           assert isinstance(raw, dict)
 
           manifest = {
@@ -103,6 +108,7 @@ jobs:
               "receipt_digest": receipt_digest,
               "trivy_db_digest": db_digest,
               "receipt_verdict": receipt_verdict,
+              "scanner_execution": evidence["scanner_execution"],
               "scanner_database_metadata": evidence.get("scanner_database", {}).get("metadata"),
           }
           with open(manifest_path, "w", encoding="utf-8") as f:
@@ -177,6 +183,7 @@ jobs:
             echo "| Receipt digest | \`${{ steps.facts.outputs.receipt_digest }}\` |"
             echo "| Trivy DB digest | \`${{ steps.facts.outputs.db_digest }}\` |"
             echo "| Receipt verdict | \`$PRODUCER_VERDICT\` |"
+            echo "| Scanner execution | \`complete\` |"
             echo "| Gate decision | \`$ACTUAL_DECISION\` |"
             echo "| Gate step outcome | \`$ACTUAL_OUTCOME\` |"
           } >> "$GITHUB_STEP_SUMMARY"

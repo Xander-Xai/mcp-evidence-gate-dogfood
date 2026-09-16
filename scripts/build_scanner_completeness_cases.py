@@ -66,6 +66,7 @@ def _materialize_case(
     execution: dict[str, Any] | None,
     *,
     verdict: str = "clean",
+    inconclusive_reason: str | None = None,
     raw_bytes: bytes,
     tamper_after_binding: bool = False,
 ) -> None:
@@ -83,6 +84,8 @@ def _materialize_case(
     _write_json(evidence_path, evidence)
     receipt = _receipt(base_receipt, evidence_path)
     receipt["verdict"] = verdict
+    if verdict == "inconclusive":
+        receipt["inconclusive_reason"] = inconclusive_reason or "evidence_unavailable"
     receipt_path = destination / "receipt.json"
     _write_json(receipt_path, receipt)
     if tamper_after_binding:
@@ -101,6 +104,27 @@ def build_cases(destination: Path) -> None:
     findings_raw["Results"][0]["Vulnerabilities"] = [{"VulnerabilityID": "CVE-DOGFOOD"}]
     findings_bytes = json.dumps(findings_raw, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     _materialize_case(destination / "complete-findings", base_receipt, base_evidence, _complete_execution(), verdict="findings", raw_bytes=findings_bytes)
+    empty_results_raw = copy.deepcopy(json.loads(raw_bytes.decode("utf-8")))
+    empty_results_raw["Results"] = []
+    empty_results_bytes = json.dumps(empty_results_raw, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    empty_results_execution = {
+        **copy.deepcopy(base_evidence["scanner_execution"]),
+        "completed_components": [],
+        "completeness_reason": "trivy_result_sections_missing",
+        "completeness_status": "incomplete",
+        "failed_components": ["result_sections"],
+        "required_work_completed": False,
+        "result_semantics_consistent": False,
+    }
+    _materialize_case(
+        destination / "producer-results-empty",
+        base_receipt,
+        base_evidence,
+        empty_results_execution,
+        verdict="inconclusive",
+        inconclusive_reason="evidence_unavailable",
+        raw_bytes=empty_results_bytes,
+    )
     _materialize_case(destination / "incomplete-zero-findings", base_receipt, base_evidence, {
         **copy.deepcopy(base_evidence["scanner_execution"]),
         "completeness_status": "incomplete",

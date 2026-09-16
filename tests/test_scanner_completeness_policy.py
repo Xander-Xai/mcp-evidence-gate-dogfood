@@ -31,6 +31,11 @@ class ScannerCompletenessPolicyTests(unittest.TestCase):
             complete = evaluate(cases / "complete-clean" / "receipt.json", cases / "complete-clean" / "evidence.json", ARTIFACT)
             self.assertEqual(complete["admission"], "eligible_for_gate")
 
+            producer_empty = evaluate(cases / "producer-results-empty" / "receipt.json", cases / "producer-results-empty" / "evidence.json", ARTIFACT)
+            self.assertEqual(producer_empty["receipt_verdict"], "inconclusive")
+            self.assertEqual(producer_empty["scanner_execution"]["status"], "incomplete")
+            self.assertEqual(producer_empty["admission"], "blocked")
+
             for name in ("incomplete-zero-findings", "failed-zero-findings", "missing-completeness", "malformed-completeness", "contradictory-complete"):
                 result = evaluate(cases / name / "receipt.json", cases / name / "evidence.json", ARTIFACT)
                 self.assertEqual(result["admission"], "blocked", name)

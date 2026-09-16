@@ -8,15 +8,15 @@
     },
     "real_trivy_consumer": {
       "workflow": ".github/workflows/real-trivy-producer.yml",
-      "producer_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
-      "gate_sha": "d404b38f0ac0303438b561fe7358b0eec487c962",
+      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
       "trivy_version": "0.74.0"
     },
     "real_osv_consumer": {
       "workflow": ".github/workflows/real-osv-producer.yml",
-      "producer_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "f736023aa23c48e9f667325f84282c8546c4aa57",
+      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
       "osv_version": "2.5.1",
       "osv_executable_sha256": "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be",
       "database_snapshot": "unavailable"
@@ -24,10 +24,10 @@
     "real_multi_receipt_composition": {
       "workflow": ".github/workflows/real-multi-receipt-composition.yml",
       "receipt_set_schema": "project-defined-receipt-set-v1",
-      "producer_reviewed_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+      "producer_reviewed_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_reviewed_sha": "b12a3615297556c6d4e86f741e223488a658da8a",
-      "core_merge_sha": "d5abcdc28d6e288da15ec69b16901ec604da5617",
+      "core_reviewed_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "core_merge_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
       "trivy_version": "0.74.0",
       "trivy_executable_sha256": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
       "osv_version": "2.5.1",
@@ -38,20 +38,33 @@
     "scanner_completeness_consumer": {
       "workflow": ".github/workflows/scanner-completeness-consumer.yml",
       "producer_pr": "Xander-Xai/mcp-evidence-producer-trivy#4",
-      "producer_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "d5abcdc28d6e288da15ec69b16901ec604da5617",
+      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
       "fixture": "evidence/scanner-completeness/zero-findings-incomplete/evidence.json",
       "expected_incomplete_admission": "blocked",
-      "core_promotion_gate": "CORE_CHANGE_REQUIRED",
-      "deterministic_case_count": 7,
-      "producer_generated_cases": ["clean", "false-clean", "tampered"]
+      "core_promotion_gate": "CORE_CHANGE_VERIFIED",
+      "deterministic_case_count": 9,
+      "producer_generated_cases": ["clean", "false-clean", "tampered", "results-empty"],
+      "source_binding_acceptance": "blocked_inconclusive",
+      "previous_acceptance": {
+        "producer_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+        "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+        "dogfood_head": "ec4522cd846f79720b5742c17e2189be5e0bfe6a",
+        "status": "superseded",
+        "external_run_ids": ["35060811762", "35060812185"]
+      },
+      "current_acceptance": {
+        "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+        "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+        "status": "current"
+      }
     },
     "real_oci_exact_identity": {
       "workflow": ".github/workflows/real-oci-identity.yml",
-      "producer_reviewed_sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+      "producer_reviewed_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_sha": "d5abcdc28d6e288da15ec69b16901ec604da5617",
+      "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
       "trivy_version": "0.74.0",
       "root_ref": "ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
       "root_index_digest": "sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
@@ -128,7 +141,14 @@
           "osv-out/receipt.json",
           "osv-out/evidence.json",
           "osv-out/osv.raw.json",
-          "osv-out/osv.stderr.log"
+          "osv-out/osv.stderr.log",
+          "strict-receipt-set.json",
+          "strict-composition.json",
+          "strict-composition-manifest.json",
+          "strict-trivy-out/receipt.json",
+          "strict-trivy-out/evidence.json",
+          "strict-trivy-out/trivy.raw.json",
+          "strict-trivy-out/trivy.stderr.log"
         ]
       },
       "real_oci_exact_identity": {
@@ -175,6 +195,32 @@
           "producer-adversarial/tampered/trivy.raw.json",
           "producer-adversarial/tampered/policy.json",
           "producer-adversarial/tampered/core.json"
+        ]
+      },
+      "scanner_completeness_results_empty": {
+        "artifact_name_prefix": "scanner-completeness-results-empty-",
+        "files": [
+          "producer-results-empty-manifest.json",
+          "acceptance.json",
+          "receipt.json",
+          "evidence.json",
+          "trivy.raw.json",
+          "trivy.stderr.log",
+          "policy.json",
+          "core.json"
+        ]
+      },
+      "osv_source_binding": {
+        "artifact_name_prefix": "real-osv-source-binding-",
+        "files": [
+          "source-binding-manifest.json",
+          "source-binding-acceptance-manifest.json",
+          "receipt.json",
+          "evidence.json",
+          "osv.raw.json",
+          "osv.stderr.log",
+          "policy.json",
+          "core.json"
         ]
       }
     }

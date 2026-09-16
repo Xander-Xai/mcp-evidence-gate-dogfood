@@ -26,7 +26,7 @@ The workflow uses `continue-on-error: true` for the Action step because `FAIL` a
 
 Zero findings do not prove that a scanner completed. The Producer PR
 `Xander-Xai/mcp-evidence-producer-trivy#4` is pinned at
-`deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` and records the project-defined
+`575a1230290b610297152e44dc6dd5b6ac6c04e9` and records the project-defined
 `scanner_execution` evidence extension. This repository adds a separate
 consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_completeness_policy.py):
 an evidence file must be digest-bound and have complete required execution
@@ -34,21 +34,28 @@ evidence before it is eligible for Core Gate evaluation.
 
 [`scanner-completeness-consumer.yml`](.github/workflows/scanner-completeness-consumer.yml)
 executes complete-clean, complete-findings, incomplete/failed zero-findings,
-missing/malformed completeness, and evidence-tampering cases. It also invokes
-the real Producer on a consumer-owned clean artifact, then sends the retained
-evidence through the immutable Core Gate. The current Core verifier does not
-interpret project-defined scanner metadata, so a self-consistent false-clean
-case is retained as `CORE_CHANGE_REQUIRED` evidence: Core's raw decision may be
-`PASS`, while the dogfood consumer admission remains blocked.
+missing/malformed/contradictory completeness, evidence-tampering, and a
+Producer-generated `Results=[]` case. It also invokes the real Producer on a
+consumer-owned clean artifact, then sends the retained evidence through the
+immutable Core Gate. Core is pinned at
+`c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` and its strict-scanner-completeness
+policy blocks digest-bound incomplete execution, so a self-consistent
+false-clean case is now `CORE_CHANGE_VERIFIED`: Core and the dogfood consumer
+both refuse admission.
+
+The previous acceptance at Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1`
+is retained in the governance/audit record as `SUPERSEDED`; it is not an active
+runtime pin. The OSV consumer also exercises the Producer's `source_binding`
+failure path and requires the resulting inconclusive evidence to remain blocked.
 
 ## Workflow
 
 The workflow runs on pushes and manual dispatch:
 
-- `.github/workflows/mcp-evidence-gate.yml` calls the reviewed Action head `9bed76881fa040c78618c23d911664e919ad90cf` by full immutable commit SHA.
-- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out Producer PR head `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1`, and calls gate `d404b38f0ac0303438b561fe7358b0eec487c962`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
-- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use the same immutable Producer PR head and retain their scanner-specific source, composition, and OCI identity assertions.
-- `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's raw decision separate from the dogfood consumer admission and records `CORE_CHANGE_REQUIRED` when the pinned Core verifier ignores incomplete project-defined execution metadata.
+- `.github/workflows/mcp-evidence-gate.yml` calls Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` by full immutable commit SHA.
+- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out Producer PR head `575a1230290b610297152e44dc6dd5b6ac6c04e9`, and calls Core at the same exact SHA. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
+- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `575a1230290b610297152e44dc6dd5b6ac6c04e9` and Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`, while retaining their scanner-specific source, composition, and OCI identity assertions.
+- `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's decision separate from dogfood admission, proves `Results=[]` is inconclusive, and records `CORE_CHANGE_VERIFIED` for strict blocking of incomplete execution metadata.
 - `dist/example-artifact.bin` is marked as binary in `.gitattributes` so Windows line-ending conversion cannot change its digest.
 - Receipts live under `evidence/` and are intentionally small, deterministic fixtures.
 

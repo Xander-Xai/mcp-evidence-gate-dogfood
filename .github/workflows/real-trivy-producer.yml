@@ -15,8 +15,8 @@ jobs:
   real-trivy-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
-      GATE_SHA: d404b38f0ac0303438b561fe7358b0eec487c962
+      PRODUCER_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
+      GATE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
@@ -127,7 +127,7 @@ jobs:
       - name: Verify real evidence with immutable gate
         id: gate
         continue-on-error: true
-        uses: yandexuanxuan/mcp-evidence-gate@d404b38f0ac0303438b561fe7358b0eec487c962
+        uses: yandexuanxuan/mcp-evidence-gate@c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
         with:
           receipt: ${{ runner.temp }}/producer-out/receipt.json
           artifact: evidence/real-trivy/requirements.txt

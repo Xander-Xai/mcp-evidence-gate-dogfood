@@ -15,10 +15,10 @@ jobs:
   real-multi-receipt-composition:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_REVIEWED_SHA: deb5c2cf225f8043b133e5bf1a39813c4c65f6c1
+      PRODUCER_REVIEWED_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
       PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
-      CORE_REVIEWED_SHA: b12a3615297556c6d4e86f741e223488a658da8a
-      CORE_MERGE_SHA: d5abcdc28d6e288da15ec69b16901ec604da5617
+      CORE_REVIEWED_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+      CORE_MERGE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
@@ -326,6 +326,105 @@ jobs:
             echo "| Composition exit | \`$composition_code\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Reject strict composition with one incomplete receipt
+        id: strict_composition
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$GITHUB_WORKSPACE/evidence/real-trivy/requirements.txt"
+          core="$RUNNER_TEMP/core/dist/cli.js"
+          cp -a "$RUNNER_TEMP/trivy-out" "$RUNNER_TEMP/strict-trivy-out"
+          python - "$RUNNER_TEMP/strict-trivy-out" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          output = Path(sys.argv[1])
+          evidence_path = output / "evidence.json"
+          evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+          execution = evidence["scanner_execution"]
+          execution.update({
+              "completeness_status": "incomplete",
+              "required_work_completed": False,
+              "result_semantics_consistent": False,
+              "completed_components": [],
+              "failed_components": ["result_sections"],
+              "completeness_reason": "trivy_result_sections_missing",
+          })
+          evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          receipt_path = output / "receipt.json"
+          receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+          evidence_digest = "sha256:" + hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+          receipt["evidence_digest"] = evidence_digest
+          receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+          cat > "$RUNNER_TEMP/strict-receipt-set.json" <<'JSON'
+          {
+            "schema_version": "project-defined-receipt-set-v1",
+            "receipts": [
+              {"id":"trivy-incomplete","receipt":"strict-trivy-out/receipt.json","evidence":"strict-trivy-out/evidence.json"},
+              {"id":"osv-complete","receipt":"osv-out/receipt.json","evidence":"osv-out/evidence.json"}
+            ]
+          }
+          JSON
+
+          evaluated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          set +e
+          node "$core" verify-set \
+            --set "$RUNNER_TEMP/strict-receipt-set.json" \
+            --artifact "$artifact" \
+            --policy strict-scanner-completeness --format json --now "$evaluated_at" \
+            > "$RUNNER_TEMP/strict-composition.json"
+          strict_code=$?
+          set -e
+          test "$strict_code" -eq 1
+
+          python - "$RUNNER_TEMP/strict-receipt-set.json" "$RUNNER_TEMP/strict-composition.json" "$RUNNER_TEMP/strict-composition-manifest.json" "$strict_code" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          set_path, composition_path, manifest_path, strict_code = sys.argv[1:]
+          receipt_set = json.loads(Path(set_path).read_text(encoding="utf-8"))
+          composition = json.loads(Path(composition_path).read_text(encoding="utf-8"))
+          entries = {entry["id"]: entry for entry in composition["receipts"]}
+
+          assert composition["policy"] == "strict-scanner-completeness"
+          assert composition["decision"] == "fail"
+          assert composition["integrity_status"] == "pass"
+          assert composition["receipt_status"] == "valid"
+          assert composition["admission_status"] == "fail"
+          assert "scanner_execution_incomplete" in composition["reason_codes"]
+          assert entries["trivy-incomplete"]["scannerExecutionStatus"] == "incomplete"
+          assert entries["trivy-incomplete"]["decision"] == "fail"
+          assert entries["trivy-incomplete"]["integrityStatus"] == "pass"
+          assert entries["osv-complete"]["scannerExecutionStatus"] == "complete"
+          assert int(strict_code) == 1
+
+          manifest = {
+              "schema_version": "dogfood-strict-multi-receipt-runtime-evidence-v1",
+              "dogfood_commit": os.environ["GITHUB_SHA"],
+              "producer_reviewed_commit": os.environ["PRODUCER_REVIEWED_SHA"],
+              "core_commit": os.environ["CORE_MERGE_SHA"],
+              "receipt_set": receipt_set,
+              "composition": composition,
+              "strict_exit_code": int(strict_code),
+              "incomplete_receipt_cannot_be_hidden": True,
+          }
+          Path(manifest_path).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          echo "strict_code=$strict_code" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Strict multi-receipt completeness rejection"
+            echo
+            echo "One digest-bound but incomplete Trivy receipt was composed with one complete OSV receipt."
+            echo "The strict-scanner-completeness aggregate decision is `fail` (exit `$strict_code`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload multi-receipt runtime evidence bundle
         if: always() && steps.composition.outputs.runtime_started == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -347,3 +446,10 @@ jobs:
             ${{ runner.temp }}/osv-out/evidence.json
             ${{ runner.temp }}/osv-out/osv.raw.json
             ${{ runner.temp }}/osv-out/osv.stderr.log
+            ${{ runner.temp }}/strict-receipt-set.json
+            ${{ runner.temp }}/strict-composition.json
+            ${{ runner.temp }}/strict-composition-manifest.json
+            ${{ runner.temp }}/strict-trivy-out/receipt.json
+            ${{ runner.temp }}/strict-trivy-out/evidence.json
+            ${{ runner.temp }}/strict-trivy-out/trivy.raw.json
+            ${{ runner.temp }}/strict-trivy-out/trivy.stderr.log

@@ -1,0 +1,14 @@
+{
+  "ArtifactName": "dist/example-artifact.bin",
+  "Results": [
+    {
+      "Class": "lang-pkgs",
+      "Target": "example-artifact.bin",
+      "Type": "unknown",
+      "Vulnerabilities": []
+    }
+  ],
+  "Trivy": {
+    "Version": "0.74.0"
+  }
+}

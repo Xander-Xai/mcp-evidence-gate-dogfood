@@ -167,6 +167,8 @@ The exact branch-head acceptance is `POST_MERGE_EXACT_MAIN_ACCEPTANCE = PASS`:
 the aggregate promotion gate and each independent consumer workflow completed
 successfully with zero skipped critical jobs. The branch remains intentionally
 unmerged; the exact workflow run/job identifiers are recorded in PR #12.
+The immediately previous PR #12 head `3600e62afc6596d2f9fb9ccbb0ad7b1ea1ba2a21`
+is retained as `SUPERSEDED_AS_ACTIVE_IDENTITY`.
 
 ## Core promotion gate
 

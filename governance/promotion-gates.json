@@ -42,6 +42,11 @@
           "sha": "a431faf84bd69a0d4ad79731ad8e7c29880c690e",
           "role": "previous Dogfood acceptance head",
           "status": "SUPERSEDED"
+        },
+        {
+          "sha": "3600e62afc6596d2f9fb9ccbb0ad7b1ea1ba2a21",
+          "role": "previous Dogfood PR #12 acceptance head",
+          "status": "SUPERSEDED_AS_ACTIVE_IDENTITY"
         }
       ]
     },

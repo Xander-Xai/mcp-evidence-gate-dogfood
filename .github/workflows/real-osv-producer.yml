@@ -28,6 +28,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Download and verify pinned OSV-Scanner
         shell: bash
         run: |
@@ -45,6 +49,20 @@ jobs:
           git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
+
+      - name: Check out immutable Core action bundle
+        uses: actions/checkout@v4
+        with:
+          repository: yandexuanxuan/mcp-evidence-gate
+          ref: ${{ env.GATE_SHA }}
+          path: .core
+          fetch-depth: 1
+
+      - name: Assert immutable Core action head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .core rev-parse HEAD)" = "$GATE_SHA"
 
       - name: Run real OSV producer against consumer-owned artifact
         shell: bash
@@ -147,12 +165,18 @@ jobs:
       - name: Verify real OSV evidence with immutable gate
         id: gate
         continue-on-error: true
-        uses: yandexuanxuan/mcp-evidence-gate@c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
-        with:
-          receipt: ${{ runner.temp }}/producer-out/receipt.json
-          artifact: evidence/real-trivy/requirements.txt
-          evidence: ${{ runner.temp }}/producer-out/evidence.json
-          policy: permissive
+        env:
+          INPUT_RECEIPT: ${{ runner.temp }}/producer-out/receipt.json
+          INPUT_ARTIFACT: evidence/real-trivy/requirements.txt
+          INPUT_EVIDENCE: ${{ runner.temp }}/producer-out/evidence.json
+          INPUT_POLICY: permissive
+        shell: bash
+        run: |
+          set +e
+          node "$GITHUB_WORKSPACE/.core/dist/action/index.cjs"
+          code=$?
+          set -e
+          exit "$code"
 
       - name: Assert dynamic OSV gate decision and Action outcome
         if: always()
@@ -236,13 +260,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
 
       - name: Check out immutable Producer PR head
         shell: bash

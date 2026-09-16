@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CORE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+
 jobs:
   verify-evidence:
     name: case (${{ matrix.name }}, ${{ matrix.receipt }}, ${{ matrix.expected_decision }})
@@ -87,15 +90,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out immutable Core action bundle
+        uses: actions/checkout@v4
+        with:
+          repository: yandexuanxuan/mcp-evidence-gate
+          ref: ${{ env.CORE_SHA }}
+          path: .core
+          fetch-depth: 1
+
+      - name: Assert immutable Core action head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .core rev-parse HEAD)" = "$CORE_SHA"
+
       - name: Verify ${{ matrix.name }}
         id: evidence
         continue-on-error: true
-        uses: yandexuanxuan/mcp-evidence-gate@c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
-        with:
-          receipt: ${{ matrix.receipt }}
-          artifact: dist/example-artifact.bin
-          policy: ${{ matrix.policy }}
-          evidence: ${{ matrix.evidence }}
+        env:
+          INPUT_RECEIPT: ${{ matrix.receipt }}
+          INPUT_ARTIFACT: dist/example-artifact.bin
+          INPUT_POLICY: ${{ matrix.policy }}
+          INPUT_EVIDENCE: ${{ matrix.evidence }}
+        shell: bash
+        run: |
+          set +e
+          node "$GITHUB_WORKSPACE/.core/dist/action/index.cjs"
+          code=$?
+          set -e
+          exit "$code"
 
       - name: Assert expected decision
         if: always()

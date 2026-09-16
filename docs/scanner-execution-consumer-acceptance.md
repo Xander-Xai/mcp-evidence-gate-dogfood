@@ -14,6 +14,12 @@ MCP Registry receipt schema or the Core Gate implementation.
 - Registry compatibility profile (unchanged):
   `registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22`.
 
+The workflows checkout Core at the exact SHA and execute its bundled
+`dist/action/index.cjs` entrypoint locally. This preserves the Core Action
+inputs/outputs and exact code while avoiding the current runner's parse error
+for the unquoted colon in that upstream `action.yml`; the Core repository is
+not modified.
+
 The Producer PR was independently checked through GitHub before this
 repository was changed: it remained OPEN at the exact head above, its
 pull-request CI runs targeted that SHA, and its Trivy, OSV, and OCI paths used

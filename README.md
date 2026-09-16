@@ -52,7 +52,7 @@ failure path and requires the resulting inconclusive evidence to remain blocked.
 
 The workflow runs on pushes and manual dispatch:
 
-- `.github/workflows/mcp-evidence-gate.yml` calls Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` by full immutable commit SHA.
+- `.github/workflows/mcp-evidence-gate.yml` checks out Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` by full immutable SHA, asserts that checkout, and runs its bundled Action entrypoint. The same exact-bundle path is used by the real Trivy/OSV consumers because the upstream `action.yml` metadata at that SHA is rejected by the current runner parser for an unquoted description colon; no upstream file is modified.
 - `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out Producer PR head `575a1230290b610297152e44dc6dd5b6ac6c04e9`, and calls Core at the same exact SHA. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
 - `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `575a1230290b610297152e44dc6dd5b6ac6c04e9` and Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`, while retaining their scanner-specific source, composition, and OCI identity assertions.
 - `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's decision separate from dogfood admission, proves `Results=[]` is inconclusive, and records `CORE_CHANGE_VERIFIED` for strict blocking of incomplete execution metadata.

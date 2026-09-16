@@ -170,6 +170,11 @@ unmerged; the exact workflow run/job identifiers are recorded in PR #12.
 The immediately previous PR #12 head `3600e62afc6596d2f9fb9ccbb0ad7b1ea1ba2a21`
 is retained as `SUPERSEDED_AS_ACTIVE_IDENTITY`.
 
+The promoted Core packaging check is `POST_MERGE_REMOTE_ACTION_LOAD = PASS`:
+the remote Action loaded `action.yml` and `dist/action/index.cjs` from Core
+`1c5a6cfae2901b97fc0925d0b102710d9a73cb82`, and all ten declared outputs plus
+the remote-vs-bundled comparison were asserted successfully.
+
 ## Core promotion gate
 
 `CORE_CHANGE_VERIFIED = YES`.

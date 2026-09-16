@@ -422,7 +422,7 @@ jobs:
             echo "## Strict multi-receipt completeness rejection"
             echo
             echo "One digest-bound but incomplete Trivy receipt was composed with one complete OSV receipt."
-            echo "The strict-scanner-completeness aggregate decision is `fail` (exit `$strict_code`)."
+            echo "The strict-scanner-completeness aggregate decision is \`fail\` (exit \`$strict_code\`)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload multi-receipt runtime evidence bundle

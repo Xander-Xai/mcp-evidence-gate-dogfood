@@ -402,7 +402,7 @@ jobs:
             echo "## OSV source_binding mismatch acceptance"
             echo
             echo "Producer classified a report bound to the wrong source path as incomplete/inconclusive."
-            echo "Dogfood policy admission is `blocked` (exit `$POLICY_CODE`); Core strict decision is `fail` (exit `$CORE_CODE`)."
+            echo "Dogfood policy admission is \`blocked\` (exit \`$POLICY_CODE\`); Core strict decision is \`fail\` (exit \`$CORE_CODE\`)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload source_binding acceptance evidence

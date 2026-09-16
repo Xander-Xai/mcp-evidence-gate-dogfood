@@ -88,24 +88,21 @@ database snapshot boundary while requiring complete execution evidence.
 
 ## Exact-head validation record
 
-Final dogfood PR head: `14c09fcd2f9f0b1d9c72525a704eb26c06b4778c`.
-All listed runs targeted that exact SHA and completed successfully:
+Executable acceptance head: `41171c05e45ef679b648f3fe62c0d078bb45806c`.
+The exact-head hosted validation run for that implementation head was
+successful:
 
-- [Scanner Completeness Consumer Acceptance](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501543)
-  — seven deterministic matrix jobs plus `producer-generated acceptance`.
-- [MCP Evidence Gate Dogfood promotion](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501689)
-  — promotion gate and all required real/non-regression consumers.
-- [Real Trivy Producer Consumer](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501521)
-  — exact-head Trivy consumer.
-- [Real OSV Producer Consumer](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501500)
-  — exact-head OSV consumer.
-- [Real OCI Exact Identity](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501503)
-  — exact-head OCI identity consumer.
-- [Real Multi-Receipt Composition](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056501525)
-  — exact-head multi-receipt consumer.
+- [MCP Evidence Gate Dogfood promotion](https://github.com/Xander-Xai/mcp-evidence-gate-dogfood/actions/runs/35056731744)
+  — head SHA `41171c05e45ef679b648f3fe62c0d078bb45806c`; it includes the
+  scanner-completeness seven-case matrix and Producer-generated acceptance
+  (`producer-generated acceptance` job `104668379125`), Trivy (`104668378974`),
+  OSV (`104668379181`), OCI (`104668379074`), multi-receipt (`104668379130`),
+  and the final `promotion-gate` (`104668474298`).
 
-The hosted external-runtime predicate is therefore `PASS`; local tests remain
-supporting evidence rather than a substitute for these runs.
+The branch may carry a later documentation-only closure commit; that commit
+does not change the executable acceptance tree validated above. The hosted
+external-runtime predicate is therefore `PASS`; local tests remain supporting
+evidence rather than a substitute for the hosted run.
 
 ## Core promotion gate
 

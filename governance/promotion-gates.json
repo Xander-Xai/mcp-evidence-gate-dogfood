@@ -128,7 +128,8 @@
         "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
         "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
         "status": "current_target",
-        "hosted_acceptance": "pending_final_dogfood_head"
+        "hosted_acceptance": "PASS",
+        "hosted_acceptance_evidence": "Exact branch-head aggregate and independent workflow runs; run IDs are recorded in PR #12."
       }
     },
     "real_oci_exact_identity": {

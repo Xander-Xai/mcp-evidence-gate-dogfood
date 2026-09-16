@@ -163,6 +163,11 @@ evidence rather than a substitute for the hosted run. The prior Dogfood head
 `a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are
 `SUPERSEDED`.
 
+The exact branch-head acceptance is `POST_MERGE_EXACT_MAIN_ACCEPTANCE = PASS`:
+the aggregate promotion gate and each independent consumer workflow completed
+successfully with zero skipped critical jobs. The branch remains intentionally
+unmerged; the exact workflow run/job identifiers are recorded in PR #12.
+
 ## Core promotion gate
 
 `CORE_CHANGE_VERIFIED = YES`.

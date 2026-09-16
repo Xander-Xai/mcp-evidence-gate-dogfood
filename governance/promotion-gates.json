@@ -142,9 +142,9 @@
       "current_acceptance": {
         "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
         "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
-        "status": "pending_p1_revalidation",
-        "hosted_acceptance": "PENDING",
-        "hosted_acceptance_evidence": "Runtime evaluation timestamp fix is committed; the prior 2192b917 exact-head runs are historical and fresh exact-head workflow runs are required."
+        "status": "accepted",
+        "hosted_acceptance": "PASS",
+        "hosted_acceptance_evidence": "Runtime evaluation timestamp closure is implemented and the final exact-head hosted suite is recorded in PR #12; the six required workflows must continue to match the resulting head SHA."
       }
     },
     "real_oci_exact_identity": {

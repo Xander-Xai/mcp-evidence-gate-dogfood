@@ -1,0 +1,14 @@
+{
+  "attestation": "publisher-asserted",
+  "evidence_digest": "sha256:110e0b89b8cf4a6670f62354c11e9f198a8e3a03626add3b0eaace1c5c540726",
+  "policy_profile": "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22",
+  "scan_scope": [
+    "dependency-vulnerabilities"
+  ],
+  "scanned_artifact_digest": "sha256:2cc9ce4ecc42ab8681853bd2e5ee4356e7dccf3033d45818df4b135c7f386b9e",
+  "scanned_artifact_ref": "dist/example-artifact.bin",
+  "scanned_at": "2026-08-25T00:00:01Z",
+  "scanner": "trivy",
+  "scanner_version": "0.74.0",
+  "verdict": "clean"
+}

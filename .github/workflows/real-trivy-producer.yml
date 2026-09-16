@@ -15,8 +15,8 @@ jobs:
   real-trivy-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: c831705f6aed062127ca4a72ba82c738831e49d4
-      GATE_SHA: d404b38f0ac0303438b561fe7358b0eec487c962
+      PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+      GATE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
@@ -27,6 +27,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - name: Download and verify pinned Trivy
         shell: bash
@@ -42,9 +46,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
+
+      - name: Check out immutable Core action bundle
+        uses: actions/checkout@v4
+        with:
+          repository: Xander-Xai/mcp-evidence-gate
+          ref: ${{ env.GATE_SHA }}
+          path: .core
+          fetch-depth: 1
+
+      - name: Assert immutable Core action head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .core rev-parse HEAD)" = "$GATE_SHA"
 
       - name: Run real producer against consumer-owned artifact
         shell: bash
@@ -87,6 +105,11 @@ jobs:
           assert evidence["raw_report"]["sha256"] == raw_report_digest.removeprefix("sha256:")
           assert evidence["scanner"]["name"] == "trivy"
           assert evidence["scanner"]["version"] == "0.74.0"
+          execution = evidence["scanner_execution"]
+          assert execution["schema_version"] == "project-defined-scanner-execution-v1"
+          assert execution["completeness_status"] == "complete"
+          assert execution["required_work_completed"] is True
+          assert execution["result_semantics_consistent"] is True
           assert isinstance(raw, dict)
 
           manifest = {
@@ -103,6 +126,7 @@ jobs:
               "receipt_digest": receipt_digest,
               "trivy_db_digest": db_digest,
               "receipt_verdict": receipt_verdict,
+              "scanner_execution": evidence["scanner_execution"],
               "scanner_database_metadata": evidence.get("scanner_database", {}).get("metadata"),
           }
           with open(manifest_path, "w", encoding="utf-8") as f:
@@ -121,12 +145,18 @@ jobs:
       - name: Verify real evidence with immutable gate
         id: gate
         continue-on-error: true
-        uses: yandexuanxuan/mcp-evidence-gate@d404b38f0ac0303438b561fe7358b0eec487c962
-        with:
-          receipt: ${{ runner.temp }}/producer-out/receipt.json
-          artifact: evidence/real-trivy/requirements.txt
-          evidence: ${{ runner.temp }}/producer-out/evidence.json
-          policy: permissive
+        env:
+          INPUT_RECEIPT: ${{ runner.temp }}/producer-out/receipt.json
+          INPUT_ARTIFACT: evidence/real-trivy/requirements.txt
+          INPUT_EVIDENCE: ${{ runner.temp }}/producer-out/evidence.json
+          INPUT_POLICY: permissive
+        shell: bash
+        run: |
+          set +e
+          node "$GITHUB_WORKSPACE/.core/dist/action/index.cjs"
+          code=$?
+          set -e
+          exit "$code"
 
       - name: Assert dynamic gate decision and Action outcome
         if: always()
@@ -177,6 +207,7 @@ jobs:
             echo "| Receipt digest | \`${{ steps.facts.outputs.receipt_digest }}\` |"
             echo "| Trivy DB digest | \`${{ steps.facts.outputs.db_digest }}\` |"
             echo "| Receipt verdict | \`$PRODUCER_VERDICT\` |"
+            echo "| Scanner execution | \`complete\` |"
             echo "| Gate decision | \`$ACTUAL_DECISION\` |"
             echo "| Gate step outcome | \`$ACTUAL_OUTCOME\` |"
           } >> "$GITHUB_STEP_SUMMARY"

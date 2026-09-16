@@ -1,6 +1,6 @@
 # mcp-evidence-gate-dogfood
 
-Cross-repository dogfood for the [MCP Evidence Gate](https://github.com/yandexuanxuan/mcp-evidence-gate) GitHub Action.
+Cross-repository dogfood for the [MCP Evidence Gate](https://github.com/Xander-Xai/mcp-evidence-gate) GitHub Action.
 
 This repository is an executable specification for downstream consumers. It keeps a small artifact and receipt fixtures, invokes the Action by immutable commit SHA, and asserts the expected release decision for each case.
 
@@ -22,13 +22,55 @@ This repository is an executable specification for downstream consumers. It keep
 
 The workflow uses `continue-on-error: true` for the Action step because `FAIL` and `INCONCLUSIVE` are intentional test outcomes. A following assertion checks both the emitted `decision` and the GitHub Actions step `outcome`. `PASS` must produce a successful step; `FAIL` and `INCONCLUSIVE` must produce a failed Action step. The workflow is green only when both values match the matrix.
 
+## Scanner execution completeness
+
+Zero findings do not prove that a scanner completed. Promoted Producer
+`Xander-Xai/mcp-evidence-producer-trivy@3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`
+records the project-defined
+`scanner_execution` evidence extension. This repository adds a separate
+consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_completeness_policy.py):
+an evidence file must be digest-bound and have complete required execution
+evidence before it is eligible for Core Gate evaluation.
+
+The producer-generated clean job also sends that promoted-main output through
+the remote Core Action with `strict-scanner-completeness` and asserts
+`decision=pass`, `integrity-status=pass`, `receipt-status=valid`, and
+`scanner-execution-status=complete` against the bundled CLI result.
+
+[`scanner-completeness-consumer.yml`](.github/workflows/scanner-completeness-consumer.yml)
+executes complete-clean, complete-findings, incomplete/failed zero-findings,
+missing/malformed/contradictory completeness, evidence-tampering, and a
+Producer-generated `Results=[]` case. It also invokes the real Producer on a
+consumer-owned clean artifact, then sends the retained evidence through the
+immutable Core Gate. Core is pinned at promoted `main`
+`1c5a6cfae2901b97fc0925d0b102710d9a73cb82` and its strict-scanner-completeness
+policy blocks digest-bound incomplete execution, so a self-consistent
+false-clean case is now `CORE_CHANGE_VERIFIED`: Core and the dogfood consumer
+both refuse admission.
+
+The previous acceptance at Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1`
+is retained in the governance/audit record as `SUPERSEDED`; it is not an active
+runtime pin. The OSV consumer also exercises the Producer's `source_binding`
+failure path and requires the resulting inconclusive evidence to remain blocked.
+
+The previous Producer PR head `575a1230290b610297152e44dc6dd5b6ac6c04e9` and
+previous Core acceptance `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` are
+`SUPERSEDED` active identities; the earlier Producer acceptance at
+`deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` remains historical only. Core PR #14
+pre-merge head `b8e39635350929e93d4f302d423ea551cd7da763` is retained as
+`PRE_MERGE_ACCEPTED_CORE_HEAD` and `SUPERSEDED AS ACTIVE IDENTITY`; promoted
+Core `main` `1c5a6cfae2901b97fc0925d0b102710d9a73cb82` is the current identity.
+
 ## Workflow
 
 The workflow runs on pushes and manual dispatch:
 
-- `.github/workflows/mcp-evidence-gate.yml` calls the reviewed Action head `9bed76881fa040c78618c23d911664e919ad90cf` by full immutable commit SHA.
-- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out producer `c831705f6aed062127ca4a72ba82c738831e49d4`, and calls gate `d404b38f0ac0303438b561fe7358b0eec487c962`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
+- `.github/workflows/mcp-evidence-gate.yml` consumes the remote Action with `uses: Xander-Xai/mcp-evidence-gate@1c5a6cfae2901b97fc0925d0b102710d9a73cb82`, compares it with the bundled entrypoint from the same exact checkout, and asserts `REMOTE_ACTION_LOAD=PASS` plus every declared output.
+- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out promoted Producer `main` `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`, and calls Core `1c5a6cfae2901b97fc0925d0b102710d9a73cb82`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
+- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` and Core `1c5a6cfae2901b97fc0925d0b102710d9a73cb82`, while retaining their scanner-specific source, composition, and OCI identity assertions.
+- `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's decision separate from dogfood admission, proves `Results=[]` is inconclusive, and records `CORE_CHANGE_VERIFIED` for strict blocking of incomplete execution metadata.
+- The same workflow runs `scripts/run_core_snapshot_acceptance.mjs` against the exact Core build for the injected-reader TOCTOU proof and the no-path, missing-file, digest-mismatch, and missing-scanner-object P2 CLI cases.
 - `dist/example-artifact.bin` is marked as binary in `.gitattributes` so Windows line-ending conversion cannot change its digest.
 - Receipts live under `evidence/` and are intentionally small, deterministic fixtures.
 
-This repository does not run a scanner and does not claim that the example server is safe. It verifies the downstream release-admission contract: scanner verdict, artifact binding, freshness, policy decision, and CI step outcome remain distinct. Warning blocking is an explicit policy choice.
+This repository runs deterministic fixture checks plus explicitly retained real Producer/Consumer workflows; it does not claim that the example server is safe. It verifies the downstream release-admission contract: scanner verdict, scanner execution, artifact binding, freshness, policy decision, and CI step outcome remain distinct. Warning blocking is an explicit policy choice.

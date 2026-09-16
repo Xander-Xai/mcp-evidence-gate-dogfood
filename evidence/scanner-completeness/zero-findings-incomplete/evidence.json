@@ -1,0 +1,80 @@
+{
+  "artifact": {
+    "ref": "dist/example-artifact.bin",
+    "sha256": "2cc9ce4ecc42ab8681853bd2e5ee4356e7dccf3033d45818df4b135c7f386b9e",
+    "size": 29
+  },
+  "invocation": {
+    "argv": [
+      "trivy",
+      "fs",
+      "--format",
+      "json",
+      "--output",
+      "trivy.raw.json",
+      "--scanners",
+      "vuln",
+      "--exit-code",
+      "0",
+      "dist/example-artifact.bin"
+    ],
+    "completed_at": "2026-08-25T00:00:01Z",
+    "exit_code": 0,
+    "started_at": "2026-08-25T00:00:00Z"
+  },
+  "producer": {
+    "name": "mcp-evidence-producer-trivy",
+    "version": "0.1.0"
+  },
+  "raw_report": {
+    "exists": true,
+    "path": "trivy.raw.json",
+    "present": true,
+    "sha256": "2d2b1a38bea23fae45101f6fc23c302b0690b1a94a69a8d42b4c66c5c8e913b2",
+    "size": 245
+  },
+  "scanner": {
+    "binary_sha256": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
+    "name": "trivy",
+    "version": "0.74.0"
+  },
+  "scanner_database": {
+    "metadata": null
+  },
+  "scanner_execution": {
+    "completed_components": [
+      "scanner_output",
+      "result_sections",
+      "artifact_binding",
+      "result_semantics"
+    ],
+    "completeness_reason": "scanner_process_failed",
+    "completeness_status": "failed",
+    "exit_code": null,
+    "exit_state_valid": false,
+    "failed_components": [
+      "scanner_process"
+    ],
+    "invocation_started": true,
+    "output_exists": true,
+    "output_parseable": true,
+    "output_present": true,
+    "output_size": 245,
+    "process_completed": false,
+    "required_components": [
+      "scanner_process",
+      "scanner_output",
+      "result_sections",
+      "artifact_binding",
+      "result_semantics"
+    ],
+    "required_work_completed": false,
+    "result_semantics_consistent": true,
+    "scanner_contract": "trivy-fs-json-v1",
+    "schema_version": "project-defined-scanner-execution-v1"
+  },
+  "schema_extensions": [
+    "project-defined-scanner-execution-v1"
+  ],
+  "schema_version": "project-defined-evidence-manifest-v1"
+}

@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CORE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+
 jobs:
   verify-evidence:
     name: case (${{ matrix.name }}, ${{ matrix.receipt }}, ${{ matrix.expected_decision }})
@@ -87,15 +90,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out immutable Core action bundle
+        uses: actions/checkout@v4
+        with:
+          repository: Xander-Xai/mcp-evidence-gate
+          ref: ${{ env.CORE_SHA }}
+          path: .core
+          fetch-depth: 1
+
+      - name: Assert immutable Core action head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .core rev-parse HEAD)" = "$CORE_SHA"
+
       - name: Verify ${{ matrix.name }}
         id: evidence
         continue-on-error: true
-        uses: yandexuanxuan/mcp-evidence-gate@9bed76881fa040c78618c23d911664e919ad90cf
-        with:
-          receipt: ${{ matrix.receipt }}
-          artifact: dist/example-artifact.bin
-          policy: ${{ matrix.policy }}
-          evidence: ${{ matrix.evidence }}
+        env:
+          INPUT_RECEIPT: ${{ matrix.receipt }}
+          INPUT_ARTIFACT: dist/example-artifact.bin
+          INPUT_POLICY: ${{ matrix.policy }}
+          INPUT_EVIDENCE: ${{ matrix.evidence }}
+        shell: bash
+        run: |
+          set +e
+          node "$GITHUB_WORKSPACE/.core/dist/action/index.cjs"
+          code=$?
+          set -e
+          exit "$code"
 
       - name: Assert expected decision
         if: always()
@@ -125,6 +148,124 @@ jobs:
     name: real-oci-identity-promotion
     uses: ./.github/workflows/real-oci-identity.yml
 
+  scanner-completeness-promotion:
+    name: scanner-completeness-promotion
+    uses: ./.github/workflows/scanner-completeness-consumer.yml
+
+  remote-action-consumer:
+    name: remote Core Action consumer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load remote Core Action at exact commit
+        id: remote
+        continue-on-error: true
+        uses: Xander-Xai/mcp-evidence-gate@1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+        with:
+          receipt: evidence/clean/evidence-match-receipt.json
+          artifact: dist/example-artifact.bin
+          evidence: evidence/clean/evidence-report.json
+          policy: permissive
+
+      - name: Check out the same Core commit for bundled comparison
+        uses: actions/checkout@v4
+        with:
+          repository: Xander-Xai/mcp-evidence-gate
+          ref: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+          path: .core
+          fetch-depth: 1
+
+      - name: Assert immutable bundled comparison head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .core rev-parse HEAD)" = "1c5a6cfae2901b97fc0925d0b102710d9a73cb82"
+
+      - name: Run bundled Core Action on the same fixture
+        id: bundled
+        continue-on-error: true
+        env:
+          GITHUB_ACTIONS: true
+          INPUT_RECEIPT: evidence/clean/evidence-match-receipt.json
+          INPUT_ARTIFACT: dist/example-artifact.bin
+          INPUT_EVIDENCE: evidence/clean/evidence-report.json
+          INPUT_POLICY: permissive
+        shell: bash
+        run: |
+          set +e
+          node "$GITHUB_WORKSPACE/.core/dist/action/index.cjs"
+          code=$?
+          set -e
+          exit "$code"
+
+      - name: Assert remote manifest load and all Action outputs
+        if: always()
+        env:
+          REMOTE_OUTCOME: ${{ steps.remote.outcome }}
+          BUNDLED_OUTCOME: ${{ steps.bundled.outcome }}
+          REMOTE_DECISION: ${{ steps.remote.outputs.decision }}
+          BUNDLED_DECISION: ${{ steps.bundled.outputs.decision }}
+          REMOTE_RECEIPT_VERDICT: ${{ steps.remote.outputs['receipt-verdict'] }}
+          BUNDLED_RECEIPT_VERDICT: ${{ steps.bundled.outputs['receipt-verdict'] }}
+          REMOTE_PROFILE: ${{ steps.remote.outputs.profile }}
+          BUNDLED_PROFILE: ${{ steps.bundled.outputs.profile }}
+          REMOTE_INTEGRITY_STATUS: ${{ steps.remote.outputs['integrity-status'] }}
+          BUNDLED_INTEGRITY_STATUS: ${{ steps.bundled.outputs['integrity-status'] }}
+          REMOTE_RECEIPT_STATUS: ${{ steps.remote.outputs['receipt-status'] }}
+          BUNDLED_RECEIPT_STATUS: ${{ steps.bundled.outputs['receipt-status'] }}
+          REMOTE_POLICY_STATUS: ${{ steps.remote.outputs['policy-status'] }}
+          BUNDLED_POLICY_STATUS: ${{ steps.bundled.outputs['policy-status'] }}
+          REMOTE_ADMISSION_STATUS: ${{ steps.remote.outputs['admission-status'] }}
+          BUNDLED_ADMISSION_STATUS: ${{ steps.bundled.outputs['admission-status'] }}
+          REMOTE_SCANNER_EXECUTION_STATUS: ${{ steps.remote.outputs['scanner-execution-status'] }}
+          BUNDLED_SCANNER_EXECUTION_STATUS: ${{ steps.bundled.outputs['scanner-execution-status'] }}
+          REMOTE_REASON_CODES: ${{ steps.remote.outputs['reason-codes'] }}
+          BUNDLED_REASON_CODES: ${{ steps.bundled.outputs['reason-codes'] }}
+          REMOTE_POLICY_VERSION: ${{ steps.remote.outputs['policy-version'] }}
+          BUNDLED_POLICY_VERSION: ${{ steps.bundled.outputs['policy-version'] }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REMOTE_OUTCOME" = success
+          test "$BUNDLED_OUTCOME" = success
+          for pair in \
+            "$REMOTE_DECISION|$BUNDLED_DECISION" \
+            "$REMOTE_RECEIPT_VERDICT|$BUNDLED_RECEIPT_VERDICT" \
+            "$REMOTE_PROFILE|$BUNDLED_PROFILE" \
+            "$REMOTE_INTEGRITY_STATUS|$BUNDLED_INTEGRITY_STATUS" \
+            "$REMOTE_RECEIPT_STATUS|$BUNDLED_RECEIPT_STATUS" \
+            "$REMOTE_POLICY_STATUS|$BUNDLED_POLICY_STATUS" \
+            "$REMOTE_ADMISSION_STATUS|$BUNDLED_ADMISSION_STATUS" \
+            "$REMOTE_SCANNER_EXECUTION_STATUS|$BUNDLED_SCANNER_EXECUTION_STATUS" \
+            "$REMOTE_REASON_CODES|$BUNDLED_REASON_CODES" \
+            "$REMOTE_POLICY_VERSION|$BUNDLED_POLICY_VERSION"; do
+            left="${pair%%|*}"
+            right="${pair#*|}"
+            test "$left" = "$right"
+          done
+          test "$REMOTE_DECISION" = pass
+          test "$REMOTE_RECEIPT_VERDICT" = clean
+          test "$REMOTE_PROFILE" = registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
+          test "$REMOTE_INTEGRITY_STATUS" = pass
+          test "$REMOTE_RECEIPT_STATUS" = valid
+          test "$REMOTE_POLICY_STATUS" = pass
+          test "$REMOTE_ADMISSION_STATUS" = pass
+          test "$REMOTE_SCANNER_EXECUTION_STATUS" = not_evaluated
+          test -z "$REMOTE_REASON_CODES"
+          test -z "$REMOTE_POLICY_VERSION"
+          {
+            echo "REMOTE_ACTION_LOAD=PASS"
+            echo "REMOTE_ACTION_OUTPUTS=PASS"
+            echo "REMOTE_VS_BUNDLED_DECISION=PASS"
+            echo "REMOTE_VS_BUNDLED_INTEGRITY=PASS"
+            echo "REMOTE_VS_BUNDLED_RECEIPT=PASS"
+            echo "REMOTE_VS_BUNDLED_POLICY=PASS"
+            echo "REMOTE_VS_BUNDLED_ADMISSION=PASS"
+            echo "REMOTE_VS_BUNDLED_SCANNER_EXECUTION=PASS"
+            echo "REMOTE_VS_BUNDLED_REASON_CODES=PASS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   promotion-gate:
     name: promotion-gate
     if: always()
@@ -134,6 +275,8 @@ jobs:
       - real-osv-promotion
       - real-multi-receipt-promotion
       - real-oci-identity-promotion
+      - scanner-completeness-promotion
+      - remote-action-consumer
     runs-on: ubuntu-latest
     steps:
       - name: Require all declared acceptance evidence
@@ -143,6 +286,8 @@ jobs:
           REAL_OSV_RESULT: ${{ needs.real-osv-promotion.result }}
           REAL_COMPOSITION_RESULT: ${{ needs.real-multi-receipt-promotion.result }}
           REAL_OCI_IDENTITY_RESULT: ${{ needs.real-oci-identity-promotion.result }}
+          SCANNER_COMPLETENESS_RESULT: ${{ needs.scanner-completeness-promotion.result }}
+          REMOTE_ACTION_RESULT: ${{ needs.remote-action-consumer.result }}
         run: |
           set -euo pipefail
           echo "deterministic_matrix=$MATRIX_RESULT"
@@ -150,11 +295,15 @@ jobs:
           echo "real_osv_consumer=$REAL_OSV_RESULT"
           echo "real_multi_receipt_composition=$REAL_COMPOSITION_RESULT"
           echo "real_oci_exact_identity=$REAL_OCI_IDENTITY_RESULT"
+          echo "scanner_completeness_consumer=$SCANNER_COMPLETENESS_RESULT"
+          echo "remote_action_consumer=$REMOTE_ACTION_RESULT"
           test "$MATRIX_RESULT" = success
           test "$REAL_TRIVY_RESULT" = success
           test "$REAL_OSV_RESULT" = success
           test "$REAL_COMPOSITION_RESULT" = success
           test "$REAL_OCI_IDENTITY_RESULT" = success
+          test "$SCANNER_COMPLETENESS_RESULT" = success
+          test "$REMOTE_ACTION_RESULT" = success
 
   legacy-required-context-anchor:
     if: always()

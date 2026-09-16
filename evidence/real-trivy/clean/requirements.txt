@@ -1,0 +1,2 @@
+# Deterministic no-advisory package name used only as a scanner fixture.
+mcp-dogfood-no-advisories-2026==0.0.0

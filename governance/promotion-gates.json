@@ -2,21 +2,84 @@
   "schema_version": "promotion-gates-v1",
   "base_branch": "main",
   "acceptance_evidence": {
+    "identity_generations": {
+      "producer": [
+        {
+          "sha": "deb5c2cf225f8043b133e5bf1a39813c4c65f6c1",
+          "role": "historical Producer acceptance",
+          "status": "SUPERSEDED"
+        },
+        {
+          "sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+          "role": "pre-merge Producer PR #4 head",
+          "status": "SUPERSEDED_AS_ACTIVE_IDENTITY"
+        },
+        {
+          "sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
+          "role": "promoted Producer main",
+          "status": "CURRENT"
+        }
+      ],
+      "core": [
+        {
+          "sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+          "role": "historical Core acceptance",
+          "status": "SUPERSEDED"
+        },
+        {
+          "sha": "b8e39635350929e93d4f302d423ea551cd7da763",
+          "role": "Core PR #14 exact head",
+          "status": "CURRENT"
+        }
+      ],
+      "dogfood": [
+        {
+          "sha": "a431faf84bd69a0d4ad79731ad8e7c29880c690e",
+          "role": "previous Dogfood acceptance head",
+          "status": "SUPERSEDED"
+        }
+      ]
+    },
     "deterministic_matrix": {
       "workflow": ".github/workflows/mcp-evidence-gate.yml",
       "required_case_count": 11
     },
+    "remote_core_action_consumer": {
+      "workflow": ".github/workflows/mcp-evidence-gate.yml",
+      "uses": "Xander-Xai/mcp-evidence-gate@b8e39635350929e93d4f302d423ea551cd7da763",
+      "fixture": "evidence/clean/evidence-match-receipt.json + evidence/clean/evidence-report.json",
+      "comparison": "remote Action versus bundled Action at the same Core commit",
+      "required_outputs": [
+        "decision",
+        "receipt-verdict",
+        "profile",
+        "integrity-status",
+        "receipt-status",
+        "policy-status",
+        "admission-status",
+        "scanner-execution-status",
+        "reason-codes",
+        "policy-version"
+      ]
+    },
+    "core_snapshot_p1_p2_consumer": {
+      "workflow": ".github/workflows/scanner-completeness-consumer.yml",
+      "script": "scripts/run_core_snapshot_acceptance.mjs",
+      "core_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
+      "p1": "single detached evidence snapshot under an injected A/B reader",
+      "p2": ["no evidence path", "missing evidence file", "digest mismatch", "missing scanner object"]
+    },
     "real_trivy_consumer": {
       "workflow": ".github/workflows/real-trivy-producer.yml",
-      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
-      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
+      "gate_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
       "trivy_version": "0.74.0"
     },
     "real_osv_consumer": {
       "workflow": ".github/workflows/real-osv-producer.yml",
-      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+      "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "gate_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
       "osv_version": "2.5.1",
       "osv_executable_sha256": "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be",
       "database_snapshot": "unavailable"
@@ -24,10 +87,10 @@
     "real_multi_receipt_composition": {
       "workflow": ".github/workflows/real-multi-receipt-composition.yml",
       "receipt_set_schema": "project-defined-receipt-set-v1",
-      "producer_reviewed_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+      "producer_reviewed_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_reviewed_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
-      "core_merge_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "core_reviewed_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
+      "core_merge_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
       "trivy_version": "0.74.0",
       "trivy_executable_sha256": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
       "osv_version": "2.5.1",
@@ -38,9 +101,9 @@
     "scanner_completeness_consumer": {
       "workflow": ".github/workflows/scanner-completeness-consumer.yml",
       "producer_pr": "Xander-Xai/mcp-evidence-producer-trivy#4",
-      "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+      "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "gate_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
       "fixture": "evidence/scanner-completeness/zero-findings-incomplete/evidence.json",
       "expected_incomplete_admission": "blocked",
       "core_promotion_gate": "CORE_CHANGE_VERIFIED",
@@ -55,16 +118,17 @@
         "external_run_ids": ["35060811762", "35060812185"]
       },
       "current_acceptance": {
-        "producer_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
-        "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
-        "status": "current"
+        "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
+        "core_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
+        "status": "current_target",
+        "hosted_acceptance": "pending_final_dogfood_head"
       }
     },
     "real_oci_exact_identity": {
       "workflow": ".github/workflows/real-oci-identity.yml",
-      "producer_reviewed_sha": "575a1230290b610297152e44dc6dd5b6ac6c04e9",
+      "producer_reviewed_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_sha": "c5467b94d9bc80c4728cceabfe567ef78ff1fa0c",
+      "core_sha": "b8e39635350929e93d4f302d423ea551cd7da763",
       "trivy_version": "0.74.0",
       "root_ref": "ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
       "root_index_digest": "sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
@@ -81,7 +145,8 @@
       "real_osv_consumer",
       "real_multi_receipt_composition",
       "real_oci_exact_identity",
-      "scanner_completeness_consumer"
+      "scanner_completeness_consumer",
+      "remote_core_action_consumer"
     ]
   },
   "legacy_required_context_bridge": {

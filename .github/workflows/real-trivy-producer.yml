@@ -15,8 +15,8 @@ jobs:
   real-trivy-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
-      GATE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+      PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+      GATE_SHA: b8e39635350929e93d4f302d423ea551cd7da763
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
@@ -46,14 +46,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
 
       - name: Check out immutable Core action bundle
         uses: actions/checkout@v4
         with:
-          repository: yandexuanxuan/mcp-evidence-gate
+          repository: Xander-Xai/mcp-evidence-gate
           ref: ${{ env.GATE_SHA }}
           path: .core
           fetch-depth: 1

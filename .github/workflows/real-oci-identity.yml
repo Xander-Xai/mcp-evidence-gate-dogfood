@@ -14,9 +14,9 @@ jobs:
   real-oci-identity:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_REVIEWED_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
+      PRODUCER_REVIEWED_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
       PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
-      CORE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+      CORE_SHA: b8e39635350929e93d4f302d423ea551cd7da763
       ROOT_REF: ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82
       ROOT_DIGEST: sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82
       PLATFORM_DIGEST: sha256:a60d068656fa8b57fb6f55565e439813aca7f44219e3239575c2e749d5f60bf7
@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           echo "runtime_started=true" >> "$GITHUB_OUTPUT"
 
-          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_REVIEWED_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_REVIEWED_SHA"
 
@@ -72,7 +72,7 @@ jobs:
               --out "$RUNNER_TEMP/oci-out"
           )
 
-          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
           git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_SHA"
           test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_SHA"
           pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile

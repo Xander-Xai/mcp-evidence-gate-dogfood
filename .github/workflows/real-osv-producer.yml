@@ -16,8 +16,8 @@ jobs:
   real-osv-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
-      GATE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+      PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+      GATE_SHA: b8e39635350929e93d4f302d423ea551cd7da763
       OSV_VERSION: 2.5.1
       OSV_EXECUTABLE_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
 
@@ -46,14 +46,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
 
       - name: Check out immutable Core action bundle
         uses: actions/checkout@v4
         with:
-          repository: yandexuanxuan/mcp-evidence-gate
+          repository: Xander-Xai/mcp-evidence-gate
           ref: ${{ env.GATE_SHA }}
           path: .core
           fetch-depth: 1
@@ -250,8 +250,8 @@ jobs:
     name: OSV source_binding mismatch acceptance
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 575a1230290b610297152e44dc6dd5b6ac6c04e9
-      GATE_SHA: c5467b94d9bc80c4728cceabfe567ef78ff1fa0c
+      PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+      GATE_SHA: b8e39635350929e93d4f302d423ea551cd7da763
 
     steps:
       - uses: actions/checkout@v4
@@ -272,7 +272,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/yandexuanxuan/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
 
@@ -298,7 +298,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
           git -C "$RUNNER_TEMP/core" checkout --detach "$GATE_SHA"
           test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$GATE_SHA"
           pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile

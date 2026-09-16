@@ -7,26 +7,30 @@ MCP Registry receipt schema or the Core Gate implementation.
 
 - Dogfood baseline `main`: `e9db561` (audited before modification).
 - Producer PR: `Xander-Xai/mcp-evidence-producer-trivy#4`.
-- Producer exact PR head: `575a1230290b610297152e44dc6dd5b6ac6c04e9`.
+- Promoted Producer `main`: `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` (CURRENT).
+- Producer PR #4 pre-merge head: `575a1230290b610297152e44dc6dd5b6ac6c04e9` (SUPERSEDED AS ACTIVE IDENTITY).
 - Producer baseline `main`: `4c4d9bd476396cd7e34e9d4182900ac00b03d17b`.
-- Core Gate exact SHA used by the new acceptance workflow:
-  `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`.
+- Core Gate PR #14 exact head: `b8e39635350929e93d4f302d423ea551cd7da763` (CURRENT).
+- Previous Core acceptance: `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` (SUPERSEDED).
+- Previous Dogfood acceptance head: `a431faf84bd69a0d4ad79731ad8e7c29880c690e` (SUPERSEDED).
 - Registry compatibility profile (unchanged):
   `registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22`.
 
-The workflows checkout Core at the exact SHA and execute its bundled
-`dist/action/index.cjs` entrypoint locally. This preserves the Core Action
-inputs/outputs and exact code while avoiding the current runner's parse error
-for the unquoted colon in that upstream `action.yml`; the Core repository is
-not modified.
+The workflows use the remote Core Action directly at
+`Xander-Xai/mcp-evidence-gate@b8e39635350929e93d4f302d423ea551cd7da763` and,
+on the same fixture, compare it with the bundled `dist/action/index.cjs` from
+that exact checkout. The remote job asserts `REMOTE_ACTION_LOAD=PASS`, every
+declared Action output, and equality of the remote and bundled decisions,
+integrity, receipt, policy, admission, scanner-execution, and reason-code
+fields.
 
-The Producer PR was independently checked through GitHub before this
-repository was changed: it remained OPEN at the exact head above, its
-pull-request CI runs targeted that SHA, and its Trivy, OSV, and OCI paths used
-the additive `project-defined-scanner-execution-v1` evidence extension. The
-earlier Dogfood acceptance at Producer
-`deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` is historical and explicitly
-`SUPERSEDED`; it is retained for audit only.
+The promoted Producer `main` and Core PR #14 identities were independently
+queried through GitHub before this repository was changed. The Producer's
+Trivy, OSV, and OCI paths use the additive
+`project-defined-scanner-execution-v1` evidence extension. The earlier
+Producer acceptance at `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` is
+historical and explicitly `SUPERSEDED`; all prior evidence remains retained
+for audit only.
 
 ## Baseline gap
 
@@ -71,6 +75,24 @@ an otherwise valid Trivy report whose `Results` array is empty; the Producer
 returns exit `1`, receipt `inconclusive`, and failed `result_sections` rather
 than manufacturing a clean verdict.
 
+## External Core P1/P2 acceptance
+
+`scripts/run_core_snapshot_acceptance.mjs` checks the exact built Core commit
+`b8e39635350929e93d4f302d423ea551cd7da763` from an external consumer. P1
+injects a reader that would return bytes A and then B, and asserts Core reads
+once and verifies the detached A snapshot for both binding and scanner
+semantics. P2 invokes the Core CLI boundary surface for:
+
+| Boundary | Expected result |
+| --- | --- |
+| no evidence path | scanner `missing`, integrity `inconclusive`, decision non-PASS |
+| missing evidence file | scanner `missing`, integrity `inconclusive`, decision non-PASS |
+| present digest mismatch | scanner `unverified`, integrity `inconclusive`, decision `inconclusive` |
+| valid digest + missing scanner object | integrity `pass`, scanner `missing`, strict decision `fail` |
+
+The script does not reimplement Core verification; it imports Core's snapshot
+and scanner functions for P1 and invokes Core's built CLI for P2.
+
 ## Producer-generated acceptance
 
 The workflow invokes the pinned Producer against the consumer-owned
@@ -111,8 +133,8 @@ path differs from the consumer artifact. It asserts Producer exit `1`, receipt
 Existing real OCI workflow assertions continue to require root index digest,
 selected platform descriptor, exact platform manifest bytes, selected digest
 binding, and complete scanner execution while checking out Producer
-`575a1230290b610297152e44dc6dd5b6ac6c04e9` and Core
-`c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`. Existing OSV workflow assertions
+`3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` and Core
+`b8e39635350929e93d4f302d423ea551cd7da763`. Existing OSV workflow assertions
 keep exit 0/1, package/source/lockfile, raw-result consistency, and the
 unavailable database snapshot boundary while requiring complete execution
 evidence; its additional source-binding mismatch job is a P2 negative
@@ -131,15 +153,17 @@ Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` and did not include the
 
 The current acceptance is tied to the final Dogfood commit and the fresh
 workflow run/job IDs recorded in PR #12. Those runs must all target the same
-final Dogfood head, Producer `575a1230290b610297152e44dc6dd5b6ac6c04e9`, and
-Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`; local tests are supporting
-evidence rather than a substitute for the hosted run.
+final Dogfood head, promoted Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`,
+and Core `b8e39635350929e93d4f302d423ea551cd7da763`; local tests are supporting
+evidence rather than a substitute for the hosted run. The prior Dogfood head
+`a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are
+`SUPERSEDED`.
 
 ## Core promotion gate
 
 `CORE_CHANGE_VERIFIED = YES`.
 
-At Core `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c`, strict-scanner-completeness
+At Core `b8e39635350929e93d4f302d423ea551cd7da763`, strict-scanner-completeness
 evaluation returns `pass` only for complete-clean evidence. A digest-bound
 false-clean, a Producer `Results=[]` receipt, and an OSV source-binding
 mismatch all return Core `fail` with scanner execution incomplete; the Dogfood

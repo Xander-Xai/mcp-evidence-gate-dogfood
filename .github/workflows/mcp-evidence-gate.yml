@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  CORE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+  CORE_SHA: 771bd2871147fe56a6ea911546ee0ddcaca01e9e
 
 jobs:
   verify-evidence:
@@ -161,7 +161,7 @@ jobs:
       - name: Load remote Core Action at exact commit
         id: remote
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+        uses: Xander-Xai/mcp-evidence-gate@771bd2871147fe56a6ea911546ee0ddcaca01e9e
         with:
           receipt: evidence/clean/evidence-match-receipt.json
           artifact: dist/example-artifact.bin
@@ -172,7 +172,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Xander-Xai/mcp-evidence-gate
-          ref: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+          ref: 771bd2871147fe56a6ea911546ee0ddcaca01e9e
           path: .core
           fetch-depth: 1
 
@@ -180,7 +180,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .core rev-parse HEAD)" = "1c5a6cfae2901b97fc0925d0b102710d9a73cb82"
+          test "$(git -C .core rev-parse HEAD)" = "771bd2871147fe56a6ea911546ee0ddcaca01e9e"
 
       - name: Run bundled Core Action on the same fixture
         id: bundled

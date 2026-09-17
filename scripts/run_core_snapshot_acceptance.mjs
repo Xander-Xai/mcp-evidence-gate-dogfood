@@ -107,7 +107,7 @@ async function main() {
     return reads === 1 ? bytesA : bytesB;
   });
   const binding = digestModule.verifyEvidenceBindingBytes(digestModule.sha256Bytes(bytesA), snapshot);
-  const execution = scannerModule.verifyScannerExecutionBytes(snapshot);
+  const execution = scannerModule.verifyScannerExecutionBytes(snapshot, baseReceipt);
   assert(reads === 1, `P1 reader was called ${reads} times`);
   assert(snapshot.snapshot && Buffer.from(snapshot.snapshot.bytes).equals(bytesA), "P1 snapshot bytes changed");
   assert(binding.status === "pass", `P1 binding status was ${binding.status}`);

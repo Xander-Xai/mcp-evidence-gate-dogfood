@@ -52,7 +52,7 @@ def main():
         receipt = {"scanner":scanner,"scanned_artifact_digest":f"sha256:{adigest}","scan_scope":["package"],"verdict":verdict,"scanned_at":"2026-09-17T00:00:00Z","attestation":"publisher-asserted","evidence_digest":f"sha256:{hashlib.sha256(evidence_path.read_bytes()).hexdigest()}"}
         if version is not None: receipt["scanner_version"] = version
         write(args.destination / name / "receipt.json", receipt)
-        expected_status = "complete" if status == "complete" and reason is None else (status if status != "complete" else ("unverified" if reason == "scanner_version_missing" else "malformed"))
+        expected_status = "complete" if status == "complete" and reason is None else (status if status != "complete" else ("unverified" if reason == "scanner_version_missing" else ("contradictory" if reason == "scanner_execution_required_components_mismatch" else "malformed")))
         write(args.destination / name / "expected.json", {"case":name,"core_sha":CORE,"profile":PROFILE,"expected_pass":reason is None and status=="complete" and verdict=="clean","expected_scanner_status":expected_status,"expected_reason":reason})
     write(args.destination / "consumer-contract-adversarial-aggregate.json", {"schema_version":"dogfood-consumer-contract-adversarial-v1","core_candidate":CORE,"producer":"3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb","registry_profile":PROFILE,"case_count":len(specs),"cases":sorted(specs)})
 

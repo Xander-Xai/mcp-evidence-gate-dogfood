@@ -26,6 +26,12 @@ declared Action output, and equality of the remote and bundled decisions,
 integrity, receipt, policy, admission, scanner-execution, and reason-code
 fields.
 
+Promotion Gate A2 additionally requires
+`.github/workflows/core-v2-adversarial-consumer.yml`. Its independent
+consumer-owned matrix materializes 20 digest-correct contract cases and
+asserts scanner identity/version, contract, required-component, exit-state,
+and failed/incomplete semantics against the exact Core candidate.
+
 The promoted Producer `main` and Core PR #14 identities were independently
 queried through GitHub before this repository was changed. The Producer's
 Trivy, OSV, and OCI paths use the additive

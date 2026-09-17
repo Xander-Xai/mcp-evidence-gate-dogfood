@@ -44,8 +44,10 @@ def main():
         if name == "evidence-scanner-name-mismatch": evidence_scanner["name"] = "osv-scanner"
         if name == "missing-evidence-version": evidence_scanner.pop("version")
         if name == "empty-evidence-version": evidence_scanner["version"] = ""
+        if name == "version-mismatch": evidence_scanner["version"] = "0.73.0"
         completed = list(components)
         if name == "required-present-not-completed": completed = completed[:-1]
+        if status == "failed": completed = []
         execution = {"schema_version":"project-defined-scanner-execution-v1","scanner_contract":contract,"invocation_started":True,"process_completed":status != "failed","exit_code":exit_code,"exit_state_valid":True,"output_present":True,"output_exists":True,"output_size":1,"output_parseable":True,"required_components":list(components),"completed_components":completed,"failed_components":([] if status != "failed" else ["scanner_process"]),"completeness_status":status,"completeness_reason":"all_required_scanner_work_completed" if status=="complete" else "scanner_work_not_completed","required_work_completed":status=="complete","result_semantics_consistent":status=="complete"}
         evidence = {"scanner": evidence_scanner, "scanner_execution": execution, "raw_report": {"exists":True,"present":True,"size":1}}
         evidence_path = args.destination / name / "evidence.json"; write(evidence_path, evidence)

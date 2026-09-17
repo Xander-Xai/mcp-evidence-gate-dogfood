@@ -35,6 +35,11 @@
           "sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
           "role": "promoted Core main",
           "status": "CURRENT"
+        },
+        {
+          "sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
+          "role": "Core PR #15 exact candidate",
+          "status": "ACTIVE_A2_CANDIDATE"
         }
       ],
       "dogfood": [
@@ -56,7 +61,7 @@
     },
     "remote_core_action_consumer": {
       "workflow": ".github/workflows/mcp-evidence-gate.yml",
-      "uses": "Xander-Xai/mcp-evidence-gate@1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "uses": "Xander-Xai/mcp-evidence-gate@771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "fixture": "evidence/clean/evidence-match-receipt.json + evidence/clean/evidence-report.json",
       "comparison": "remote Action versus bundled Action at the same Core commit",
       "promoted_main_strict_fixture": "producer-generated evidence/real-trivy/clean/requirements.txt",
@@ -77,21 +82,21 @@
     "core_snapshot_p1_p2_consumer": {
       "workflow": ".github/workflows/scanner-completeness-consumer.yml",
       "script": "scripts/run_core_snapshot_acceptance.mjs",
-      "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "core_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "p1": "single detached evidence snapshot under an injected A/B reader",
       "p2": ["no evidence path", "missing evidence file", "digest mismatch", "missing scanner object"]
     },
     "real_trivy_consumer": {
       "workflow": ".github/workflows/real-trivy-producer.yml",
       "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
-      "gate_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "gate_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "trivy_version": "0.74.0"
     },
     "real_osv_consumer": {
       "workflow": ".github/workflows/real-osv-producer.yml",
       "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "gate_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "osv_version": "2.5.1",
       "osv_executable_sha256": "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be",
       "database_snapshot": "unavailable",
@@ -103,8 +108,8 @@
       "receipt_set_schema": "project-defined-receipt-set-v1",
       "producer_reviewed_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_reviewed_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
-      "core_merge_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "core_reviewed_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
+      "core_candidate_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "trivy_version": "0.74.0",
       "trivy_executable_sha256": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
       "osv_version": "2.5.1",
@@ -117,7 +122,7 @@
       "producer_pr": "Xander-Xai/mcp-evidence-producer-trivy#4",
       "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "gate_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "fixture": "evidence/scanner-completeness/zero-findings-incomplete/evidence.json",
       "expected_incomplete_admission": "blocked",
       "core_promotion_gate": "CORE_CHANGE_VERIFIED",
@@ -141,7 +146,7 @@
       },
       "current_acceptance": {
         "producer_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
-        "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+        "core_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
         "status": "accepted",
         "hosted_acceptance": "PASS",
         "hosted_acceptance_evidence": "Runtime evaluation timestamp closure is implemented and the final exact-head hosted suite is recorded in PR #12; the six required workflows must continue to match the resulting head SHA."
@@ -151,7 +156,7 @@
       "workflow": ".github/workflows/real-oci-identity.yml",
       "producer_reviewed_sha": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_sha": "1c5a6cfae2901b97fc0925d0b102710d9a73cb82",
+      "core_sha": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
       "trivy_version": "0.74.0",
       "root_ref": "ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
       "root_index_digest": "sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",

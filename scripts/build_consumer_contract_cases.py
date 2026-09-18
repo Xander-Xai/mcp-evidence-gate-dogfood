@@ -6,7 +6,7 @@ from pathlib import Path
 
 TRIVY = ["scanner_process", "scanner_output", "result_sections", "artifact_binding", "result_semantics"]
 OSV = ["scanner_process", "scanner_output", "result_sections", "source_binding", "result_semantics"]
-CORE = "771bd2871147fe56a6ea911546ee0ddcaca01e9e"
+CORE = "52c224b36a54e450dbe25ad56988f29e4795753e"
 PROFILE = "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22"
 
 def write(path: Path, value):

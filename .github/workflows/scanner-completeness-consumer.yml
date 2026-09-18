@@ -21,7 +21,7 @@ permissions:
 env:
   PRODUCER_PR_HEAD_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
   PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
-  GATE_SHA: 771bd2871147fe56a6ea911546ee0ddcaca01e9e
+  GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
 
 jobs:
   deterministic-scanner-completeness:
@@ -356,7 +356,7 @@ jobs:
       - name: Run remote Core Action on promoted-main clean evidence
         id: remote_clean
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@771bd2871147fe56a6ea911546ee0ddcaca01e9e
+        uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e
         with:
           receipt: ${{ runner.temp }}/producer-out/receipt.json
           artifact: evidence/real-trivy/clean/requirements.txt

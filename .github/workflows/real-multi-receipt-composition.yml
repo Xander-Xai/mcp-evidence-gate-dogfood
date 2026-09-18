@@ -247,7 +247,9 @@ jobs:
           osv_raw = load(osv_out / "osv.raw.json")
           osv_sources = [row.get("source", {}) for row in osv_raw.get("results", [])]
           assert osv_sources
-          assert all(Path(source["path"]).resolve() == artifact for source in osv_sources)
+          osv_snapshot_target = Path(osv_evidence["invocation"]["argv"][-1]).resolve()
+          assert osv_snapshot_target != artifact
+          assert all(Path(source["path"]).resolve() == osv_snapshot_target for source in osv_sources)
           source_types = {source.get("type") for source in osv_sources}
           assert source_types <= {"lockfile", "unknown"}
           assert "lockfile" in source_types

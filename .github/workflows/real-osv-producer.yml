@@ -125,7 +125,9 @@ jobs:
           assert isinstance(raw.get("results"), list) and raw["results"]
 
           sources = [result.get("source", {}) for result in raw["results"]]
-          assert all(Path(source["path"]).resolve() == expected_artifact for source in sources)
+          snapshot_target = Path(evidence["invocation"]["argv"][-1]).resolve()
+          assert snapshot_target != expected_artifact
+          assert all(Path(source["path"]).resolve() == snapshot_target for source in sources)
           observed_source_types = {source.get("type") for source in sources}
           assert observed_source_types <= {"lockfile", "unknown"}
           assert "lockfile" in observed_source_types

@@ -25,7 +25,7 @@ The workflow uses `continue-on-error: true` for the Action step because `FAIL` a
 ## Scanner execution completeness
 
 Zero findings do not prove that a scanner completed. Promoted Producer
-`Xander-Xai/mcp-evidence-producer-trivy@3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`
+`Xander-Xai/mcp-evidence-producer-trivy@32eb55168b82991df689c943ae23fbb0ae6867dd`
 records the project-defined
 `scanner_execution` evidence extension. This repository adds a separate
 consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_completeness_policy.py):
@@ -68,8 +68,8 @@ historical.
 The workflow runs on pushes and manual dispatch:
 
 - `.github/workflows/mcp-evidence-gate.yml` consumes the remote Action with `uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e`, compares it with the bundled entrypoint from the same exact checkout, and asserts `REMOTE_ACTION_LOAD=PASS` plus every declared output.
-- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out promoted Producer `main` `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`, and calls Core `52c224b36a54e450dbe25ad56988f29e4795753e`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
-- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` and Core `52c224b36a54e450dbe25ad56988f29e4795753e`, while retaining their scanner-specific source, composition, and OCI identity assertions.
+- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out promoted Producer `main` `32eb55168b82991df689c943ae23fbb0ae6867dd`, and calls Core `52c224b36a54e450dbe25ad56988f29e4795753e`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
+- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `32eb55168b82991df689c943ae23fbb0ae6867dd` and Core `52c224b36a54e450dbe25ad56988f29e4795753e`, while retaining their scanner-specific source, composition, and OCI identity assertions.
 - `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's decision separate from dogfood admission, proves `Results=[]` is inconclusive, and records `CORE_CHANGE_VERIFIED` for strict blocking of incomplete execution metadata.
 - The same workflow runs `scripts/run_core_snapshot_acceptance.mjs` against the exact Core build for the injected-reader TOCTOU proof and the no-path, missing-file, digest-mismatch, and missing-scanner-object P2 CLI cases.
 - `dist/example-artifact.bin` is marked as binary in `.gitattributes` so Windows line-ending conversion cannot change its digest.

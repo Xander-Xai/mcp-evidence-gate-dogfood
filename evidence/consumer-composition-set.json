@@ -1,0 +1,13 @@
+{
+  "schema_version": "project-defined-receipt-set-v1",
+  "receipts": [
+    {
+      "id": "clean-a",
+      "receipt": "clean/receipt.json"
+    },
+    {
+      "id": "clean-b",
+      "receipt": "clean/receipt.json"
+    }
+  ]
+}

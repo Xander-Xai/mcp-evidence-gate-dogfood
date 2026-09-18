@@ -11,7 +11,7 @@ is pending fresh hosted execution.
 
 - Dogfood baseline `main`: `e9db561` (audited before modification).
 - Producer PR: `Xander-Xai/mcp-evidence-producer-trivy#4`.
-- Promoted Producer `main`: `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` (CURRENT).
+- Promoted Producer `main`: `32eb55168b82991df689c943ae23fbb0ae6867dd` (CURRENT).
 - Producer PR #4 pre-merge head: `575a1230290b610297152e44dc6dd5b6ac6c04e9` (SUPERSEDED AS ACTIVE IDENTITY).
 - Producer baseline `main`: `4c4d9bd476396cd7e34e9d4182900ac00b03d17b`.
 - Core promoted `main`: `52c224b36a54e450dbe25ad56988f29e4795753e` (CURRENT).
@@ -148,7 +148,7 @@ path differs from the consumer artifact. It asserts Producer exit `1`, receipt
 Existing real OCI workflow assertions continue to require root index digest,
 selected platform descriptor, exact platform manifest bytes, selected digest
 binding, and complete scanner execution while checking out Producer
-`3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb` and Core
+`32eb55168b82991df689c943ae23fbb0ae6867dd` and Core
 `52c224b36a54e450dbe25ad56988f29e4795753e`. Existing OSV workflow assertions
 keep exit 0/1, package/source/lockfile, raw-result consistency, and the
 unavailable database snapshot boundary while requiring complete execution
@@ -168,7 +168,7 @@ Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` and did not include the
 
 The current acceptance is tied to the new Dogfood commit and the fresh
 workflow run/job IDs recorded in PR #12. Those runs must all target the same
-new Dogfood head, promoted Producer `3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb`,
+new Dogfood head, promoted Producer `32eb55168b82991df689c943ae23fbb0ae6867dd`,
 and Core `52c224b36a54e450dbe25ad56988f29e4795753e`; local tests are supporting
 evidence rather than a substitute for the hosted run. The prior Dogfood head
 `a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are

@@ -1,8 +1,10 @@
 # Producer snapshot TOCTOU Consumer Acceptance
 
-This Dogfood layer independently checks Producer PR #5 at
-`3462989a9f52a14e680e0c63b402beb84649f922` against promoted Core
-`52c224b36a54e450dbe25ad56988f29e4795753e`.
+This Dogfood layer independently checks the promoted Producer main at
+`32eb55168b82991df689c943ae23fbb0ae6867dd` against promoted Core
+`52c224b36a54e450dbe25ad56988f29e4795753e`. The previously accepted
+pre-merge Producer head `3462989a9f52a14e680e0c63b402beb84649f922` remains
+historical and is not an active runtime pin.
 
 The acceptance does not import Producer self-tests as proof. It imports the
 exact checked-out Producer in a separate runner harness and exercises its real
@@ -25,5 +27,6 @@ non-regression, and composition coverage are retained as hosted artifacts.
 The temporary snapshot path is scanner execution metadata only. Receipt and
 evidence subject references remain the original consumer path, and downstream
 Core does not require the temporary path to survive. Producer correctness does
-not weaken Core/Dogfood consumer distrust. Producer PR #5 and this Dogfood B2
-PR remain unmerged until their separate promotion audits.
+not weaken Core/Dogfood consumer distrust. The historical Dogfood B2 head
+`3077a2df228831e32ec08f83a2c8672e6040e71a` remains pre-merge Producer
+acceptance evidence only.

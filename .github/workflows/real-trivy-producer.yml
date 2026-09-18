@@ -15,7 +15,7 @@ jobs:
   real-trivy-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+      PRODUCER_SHA: 32eb55168b82991df689c943ae23fbb0ae6867dd
       GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a

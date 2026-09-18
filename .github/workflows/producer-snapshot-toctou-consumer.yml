@@ -14,8 +14,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_CANDIDATE_SHA: 3462989a9f52a14e680e0c63b402beb84649f922
-  PRODUCER_MAIN_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+  PRODUCER_PROMOTED_SHA: 32eb55168b82991df689c943ae23fbb0ae6867dd
   CORE_PROMOTED_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
   DOGFOOD_BASE_SHA: 655a707737631d2b9b84f9c5d0a6ab26756bd5eb
   REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
@@ -36,8 +35,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
-          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
-          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_PROMOTED_SHA"
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
           git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_PROMOTED_SHA"
           test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_PROMOTED_SHA"
@@ -49,7 +48,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: producer-snapshot-toctou-${{ github.sha }}-producer-3462989a
+          name: producer-snapshot-toctou-${{ github.sha }}-producer-32eb5516
           retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/b2
@@ -80,8 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
-          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
-          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_PROMOTED_SHA"
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
           git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_PROMOTED_SHA"
           test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_PROMOTED_SHA"
@@ -122,7 +121,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: producer-snapshot-real-${{ github.sha }}-producer-3462989a
+          name: producer-snapshot-real-${{ github.sha }}-producer-32eb5516
           retention-days: 90
           if-no-files-found: error
           path: |
@@ -146,8 +145,8 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check --no-input pytest
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
-          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
-          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_PROMOTED_SHA"
           cd "$RUNNER_TEMP/producer"
           python -m pytest -q tests/test_oci_identity.py tests/test_oci_adapter.py tests/test_oci_producer.py
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
@@ -176,13 +175,13 @@ jobs:
           cp "$RUNNER_TEMP/composition.json" "$RUNNER_TEMP/oci-composition/composition.json"
           python - <<'PY'
           import json,os
-          json.dump({'producer_sha':os.environ['PRODUCER_CANDIDATE_SHA'],'core_sha':os.environ['CORE_PROMOTED_SHA'],'oci':'PASS','multi_receipt':'PASS: consumer verify-set exercised'},open(os.path.join(os.environ['RUNNER_TEMP'],'oci-composition','manifest.json'),'w'),indent=2)
+          json.dump({'producer_sha':os.environ['PRODUCER_PROMOTED_SHA'],'core_sha':os.environ['CORE_PROMOTED_SHA'],'oci':'PASS','multi_receipt':'PASS: consumer verify-set exercised'},open(os.path.join(os.environ['RUNNER_TEMP'],'oci-composition','manifest.json'),'w'),indent=2)
           PY
       - name: Upload OCI/composition evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: producer-snapshot-oci-composition-${{ github.sha }}-producer-3462989a
+          name: producer-snapshot-oci-composition-${{ github.sha }}-producer-32eb5516
           retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/oci-composition

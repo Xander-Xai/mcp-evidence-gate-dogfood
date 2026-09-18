@@ -152,6 +152,10 @@ jobs:
     name: scanner-completeness-promotion
     uses: ./.github/workflows/scanner-completeness-consumer.yml
 
+  producer-snapshot-toctou-promotion:
+    name: producer-snapshot-toctou-promotion
+    uses: ./.github/workflows/producer-snapshot-toctou-consumer.yml
+
   remote-action-consumer:
     name: remote Core Action consumer
     runs-on: ubuntu-latest
@@ -276,6 +280,7 @@ jobs:
       - real-multi-receipt-promotion
       - real-oci-identity-promotion
       - scanner-completeness-promotion
+      - producer-snapshot-toctou-promotion
       - remote-action-consumer
     runs-on: ubuntu-latest
     steps:
@@ -287,6 +292,7 @@ jobs:
           REAL_COMPOSITION_RESULT: ${{ needs.real-multi-receipt-promotion.result }}
           REAL_OCI_IDENTITY_RESULT: ${{ needs.real-oci-identity-promotion.result }}
           SCANNER_COMPLETENESS_RESULT: ${{ needs.scanner-completeness-promotion.result }}
+          PRODUCER_SNAPSHOT_RESULT: ${{ needs.producer-snapshot-toctou-promotion.result }}
           REMOTE_ACTION_RESULT: ${{ needs.remote-action-consumer.result }}
         run: |
           set -euo pipefail
@@ -296,6 +302,7 @@ jobs:
           echo "real_multi_receipt_composition=$REAL_COMPOSITION_RESULT"
           echo "real_oci_exact_identity=$REAL_OCI_IDENTITY_RESULT"
           echo "scanner_completeness_consumer=$SCANNER_COMPLETENESS_RESULT"
+          echo "producer_artifact_snapshot_external_acceptance=$PRODUCER_SNAPSHOT_RESULT"
           echo "remote_action_consumer=$REMOTE_ACTION_RESULT"
           test "$MATRIX_RESULT" = success
           test "$REAL_TRIVY_RESULT" = success
@@ -303,6 +310,7 @@ jobs:
           test "$REAL_COMPOSITION_RESULT" = success
           test "$REAL_OCI_IDENTITY_RESULT" = success
           test "$SCANNER_COMPLETENESS_RESULT" = success
+          test "$PRODUCER_SNAPSHOT_RESULT" = success
           test "$REMOTE_ACTION_RESULT" = success
 
   legacy-required-context-anchor:

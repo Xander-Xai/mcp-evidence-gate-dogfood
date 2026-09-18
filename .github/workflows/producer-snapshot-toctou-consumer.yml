@@ -1,6 +1,7 @@
 name: Producer Snapshot TOCTOU Consumer Acceptance
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     paths:
@@ -135,6 +136,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
+      - uses: pnpm/action-setup@v4
+        with: {version: 10.33.4}
+      - uses: actions/setup-node@v4
+        with: {node-version: 24}
       - name: Checkout exact candidate and run OCI/composition regression tests
         shell: bash
         run: |
@@ -145,12 +150,33 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
           cd "$RUNNER_TEMP/producer"
           python -m pytest -q tests/test_oci_identity.py tests/test_oci_adapter.py tests/test_oci_producer.py
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_PROMOTED_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+          set +e
+          node "$RUNNER_TEMP/core/dist/cli.js" verify-set \
+            --set "$GITHUB_WORKSPACE/evidence/consumer-composition-set.json" \
+            --artifact "$GITHUB_WORKSPACE/dist/example-artifact.bin" \
+            --policy permissive --format json > "$RUNNER_TEMP/composition.json"
+          composition_code=$?
+          set -e
+          test "$composition_code" -ne 3
+          python - "$RUNNER_TEMP/composition.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1],encoding='utf-8'))
+          assert result['mode']=='receipt-set'
+          assert result['receiptCount'] >= 2
+          assert result['profile']=='registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22'
+          PY
       - name: Record non-regression result
         run: |
           mkdir -p "$RUNNER_TEMP/oci-composition"
+          cp "$RUNNER_TEMP/composition.json" "$RUNNER_TEMP/oci-composition/composition.json"
           python - <<'PY'
           import json,os
-          json.dump({'producer_sha':os.environ['PRODUCER_CANDIDATE_SHA'],'oci':'PASS','multi_receipt':'covered by real scanner evidence'},open(os.path.join(os.environ['RUNNER_TEMP'],'oci-composition','manifest.json'),'w'),indent=2)
+          json.dump({'producer_sha':os.environ['PRODUCER_CANDIDATE_SHA'],'core_sha':os.environ['CORE_PROMOTED_SHA'],'oci':'PASS','multi_receipt':'PASS: consumer verify-set exercised'},open(os.path.join(os.environ['RUNNER_TEMP'],'oci-composition','manifest.json'),'w'),indent=2)
           PY
       - name: Upload OCI/composition evidence
         if: always()

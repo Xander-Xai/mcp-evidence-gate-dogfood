@@ -188,6 +188,7 @@ def main() -> int:
         # Concurrent Trivy invocations use distinct ContextVar metadata.
         barrier = threading.Barrier(2)
         concurrent_results = {}
+        concurrent_errors = {}
         def concurrent_run(argv, **_kwargs):
             target = Path(argv[-1])
             barrier.wait(timeout=10)
@@ -197,11 +198,17 @@ def main() -> int:
         sources = [(root / "concurrent-a.txt", b"AAAA"), (root / "concurrent-b.txt", b"BBBBBBBB")]
         for path, data in sources: path.write_bytes(data)
         def invoke(name, path):
-            code = producer.run(str(binary), path, args.out / name)
-            concurrent_results[name] = (code, load(args.out / name / "evidence.json"))
+            try:
+                code = producer.run(str(binary), path, args.out / name)
+                concurrent_results[name] = (code, load(args.out / name / "evidence.json"))
+            except BaseException as error:
+                concurrent_errors[name] = repr(error)
         threads = [threading.Thread(target=invoke, args=(f"concurrent-{i}", p)) for i, (p, _) in enumerate(sources)]
         for thread in threads: thread.start()
         for thread in threads: thread.join(timeout=20)
+        assert all(not thread.is_alive() for thread in threads)
+        assert not concurrent_errors, concurrent_errors
+        assert set(concurrent_results) == {"concurrent-0", "concurrent-1"}
         assert all(code == 0 for code, _ in concurrent_results.values())
         for name, (_, evidence) in concurrent_results.items():
             expected = sources[int(name.rsplit("-", 1)[1])][1]

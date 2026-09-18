@@ -1,0 +1,159 @@
+name: Producer Snapshot TOCTOU Consumer Acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/producer-snapshot-toctou-consumer.yml
+      - scripts/run_producer_snapshot_toctou_acceptance.py
+      - governance/promotion-gates.json
+      - docs/producer-snapshot-toctou-consumer-acceptance.md
+
+permissions:
+  contents: read
+
+env:
+  PRODUCER_CANDIDATE_SHA: 3462989a9f52a14e680e0c63b402beb84649f922
+  PRODUCER_MAIN_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+  CORE_PROMOTED_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
+  DOGFOOD_BASE_SHA: 655a707737631d2b9b84f9c5d0a6ab26756bd5eb
+  REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
+
+jobs:
+  deterministic-toctou:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: pnpm/action-setup@v4
+        with: {version: 10.33.4}
+      - uses: actions/setup-node@v4
+        with: {node-version: 24}
+      - name: Checkout exact Producer and Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_PROMOTED_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Run external deterministic A/B, drift, failure, and concurrency harness
+        run: python scripts/run_producer_snapshot_toctou_acceptance.py --producer "$RUNNER_TEMP/producer" --core "$RUNNER_TEMP/core" --out "$RUNNER_TEMP/b2"
+      - name: Upload deterministic B2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: producer-snapshot-toctou-${{ github.sha }}-producer-3462989a
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/b2
+
+  real-trivy-osv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: pnpm/action-setup@v4
+        with: {version: 10.33.4}
+      - uses: actions/setup-node@v4
+        with: {node-version: 24}
+      - name: Download pinned scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tar.gz" https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          echo '2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  '"$RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP"
+          test "$(sha256sum "$RUNNER_TEMP/trivy" | cut -d' ' -f1)" = d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
+          curl -fsSL -o "$RUNNER_TEMP/osv-scanner" https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64
+          echo 'f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  '"$RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: Checkout exact Producer and Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_PROMOTED_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_PROMOTED_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Run real candidate Producer and promoted Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$GITHUB_WORKSPACE/evidence/real-trivy/requirements.txt"
+          python -m src.producer --trivy "$RUNNER_TEMP/trivy" --artifact "$artifact" --out "$RUNNER_TEMP/trivy-out"
+          python -m src.osv_producer --osv "$RUNNER_TEMP/osv-scanner" --artifact "$artifact" --out "$RUNNER_TEMP/osv-out"
+          for scanner in trivy osv; do
+            out="$RUNNER_TEMP/${scanner}-out"
+            set +e
+            node "$RUNNER_TEMP/core/dist/cli.js" verify --receipt "$out/receipt.json" --artifact "$artifact" --evidence "$out/evidence.json" --policy strict-scanner-completeness --format json > "$RUNNER_TEMP/${scanner}-core.json"
+            code=$?
+            set -e
+            test "$code" -ne 3
+          done
+          python - "$artifact" "$RUNNER_TEMP/trivy-out" "$RUNNER_TEMP/osv-out" <<'PY'
+          import hashlib,json,sys
+          from pathlib import Path
+          artifact=Path(sys.argv[1]).resolve()
+          for directory in sys.argv[2:]:
+              out=Path(directory); r=json.loads((out/'receipt.json').read_text()); e=json.loads((out/'evidence.json').read_text())
+              assert Path(r['scanned_artifact_ref']).resolve()==artifact
+              assert e['artifact']['ref']==str(artifact)
+              assert e['scan_input']['source_ref']==str(artifact)
+              assert r['scanned_artifact_digest']=='sha256:'+e['scan_input']['sha256']== 'sha256:'+e['artifact']['sha256']
+              assert e['artifact']['size']==e['scan_input']['size']
+              assert e['invocation']['argv'][-1] != str(artifact)
+              assert 'mcp-evidence-snapshot-' in e['invocation']['argv'][-1]
+              assert e['scanner_execution']['completeness_status']=='complete'
+          PY
+      - name: Upload real B2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: producer-snapshot-real-${{ github.sha }}-producer-3462989a
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/trivy-out
+            ${{ runner.temp }}/osv-out
+            ${{ runner.temp }}/*-core.json
+
+  oci-and-composition-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Checkout exact candidate and run OCI/composition regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
+          python -m pytest -q "$RUNNER_TEMP/producer/tests/test_oci_identity.py" "$RUNNER_TEMP/producer/tests/test_oci_adapter.py" "$RUNNER_TEMP/producer/tests/test_oci_producer.py"
+      - name: Record non-regression result
+        run: |
+          mkdir -p "$RUNNER_TEMP/oci-composition"
+          python - <<'PY'
+          import json,os
+          json.dump({'producer_sha':os.environ['PRODUCER_CANDIDATE_SHA'],'oci':'PASS','multi_receipt':'covered by real scanner evidence'},open(os.path.join(os.environ['RUNNER_TEMP'],'oci-composition','manifest.json'),'w'),indent=2)
+          PY
+      - name: Upload OCI/composition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: producer-snapshot-oci-composition-${{ github.sha }}-producer-3462989a
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/oci-composition

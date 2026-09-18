@@ -1,6 +1,10 @@
 {
   "schema_version": "promotion-gates-v1",
   "base_branch": "main",
+  "producer_promoted_main": "3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb",
+  "producer_b1_candidate": "3462989a9f52a14e680e0c63b402beb84649f922",
+  "core_promoted_main": "52c224b36a54e450dbe25ad56988f29e4795753e",
+  "dogfood_promoted_base": "655a707737631d2b9b84f9c5d0a6ab26756bd5eb",
   "core_promoted_main": "52c224b36a54e450dbe25ad56988f29e4795753e",
   "core_accepted_premerge_head": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
   "dogfood_premerge_core_acceptance_head": "e09bf948383890d04e23740992516ebf629f1728",
@@ -183,7 +187,22 @@
       "real_oci_exact_identity",
       "scanner_completeness_consumer",
       "consumer_owned_contract_adversarial_matrix",
+      "producer_artifact_snapshot_external_acceptance",
       "remote_core_action_consumer"
+    ]
+  },
+  "producer_artifact_snapshot_external_acceptance": {
+    "required": true,
+    "workflow": ".github/workflows/producer-snapshot-toctou-consumer.yml",
+    "producer_sha": "3462989a9f52a14e680e0c63b402beb84649f922",
+    "core_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+    "invariants": [
+      "trivy_source_replacement_reads_snapshot_A",
+      "osv_source_replacement_reads_snapshot_A",
+      "snapshot_drift_fails_closed",
+      "snapshot_failure_has_no_empty_digest",
+      "concurrent_invocation_isolation",
+      "core_A_passes_core_B_nonpasses"
     ]
   },
   "legacy_required_context_bridge": {

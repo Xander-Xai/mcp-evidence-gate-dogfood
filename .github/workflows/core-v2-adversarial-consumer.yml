@@ -1,0 +1,99 @@
+name: Core v2 Adversarial Consumer Acceptance
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CORE_CANDIDATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
+  PRODUCER_FROZEN_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
+  REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
+
+jobs:
+  adversarial-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.4 }
+      - name: Build consumer-owned contract fixtures
+        run: python scripts/build_consumer_contract_cases.py "$GITHUB_WORKSPACE/consumer-contract-cases"
+      - name: Checkout and build exact Core candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_CANDIDATE_SHA"
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Execute and assert all adversarial cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          cases=(trivy-valid-complete narrowed-required-components omitted-required-component required-present-not-completed unknown-contract wrong-contract-for-scanner evidence-scanner-name-mismatch missing-receipt-version empty-receipt-version missing-evidence-version empty-evidence-version version-mismatch trivy-complete-exit-1 trivy-complete-exit-999 trivy-failed-exit-1 trivy-failed-exit-999 incomplete-illegal-exit osv-valid-complete-exit-0 osv-valid-complete-exit-1 osv-failed-exit-2)
+          for case in "${cases[@]}"; do
+            dir="$GITHUB_WORKSPACE/consumer-contract-cases/$case"
+            set +e
+            node "$RUNNER_TEMP/core/dist/cli.js" verify --receipt "$dir/receipt.json" --artifact "$GITHUB_WORKSPACE/dist/example-artifact.bin" --evidence "$dir/evidence.json" --policy strict-scanner-completeness --format json --now 2026-09-17T00:00:00Z > "$dir/core.json"
+            code=$?
+            set -e
+            python - "$dir" "$code" <<'PY'
+          import json,sys
+          from pathlib import Path
+          d=Path(sys.argv[1]); code=int(sys.argv[2]); core=json.loads((d/'core.json').read_text()); exp=json.loads((d/'expected.json').read_text());
+          assert core['policy_version']=='scanner-execution-completeness-policy-v2', core
+          assert core['integrity_status']=='pass', core
+          assert core['decision'] == ('pass' if exp['expected_pass'] else 'fail'), core
+          assert core['scanner_execution_status']==exp['expected_scanner_status'], core
+          if exp['expected_reason']: assert exp['expected_reason'] in core['reason_codes'], core
+          (d/'acceptance.json').write_text(json.dumps({'case':exp['case'],'core_sha':exp['core_sha'],'core_exit_code':code,'core':core,'expected':exp},indent=2,sort_keys=True)+'\n')
+          PY
+          done
+          python - "$GITHUB_WORKSPACE/consumer-contract-cases" "$GITHUB_SHA" <<'PY'
+          import json,sys
+          from pathlib import Path
+          root=Path(sys.argv[1]); cases=sorted(p.name for p in root.iterdir() if p.is_dir());
+          assert len(cases)==20, cases
+          aggregate=json.loads((root/'consumer-contract-adversarial-aggregate.json').read_text()); aggregate['dogfood_head']=sys.argv[2]; aggregate['aggregate_acceptance']='PASS'; aggregate['outcomes']=[json.loads((root/c/'acceptance.json').read_text()) for c in cases]; (root/'consumer-contract-adversarial-aggregate.json').write_text(json.dumps(aggregate,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: External Action positive control
+        id: action_positive
+        uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e
+        with:
+          receipt: consumer-contract-cases/trivy-valid-complete/receipt.json
+          artifact: dist/example-artifact.bin
+          evidence: consumer-contract-cases/trivy-valid-complete/evidence.json
+          policy: strict-scanner-completeness
+      - name: External Action narrowed-components rejection
+        id: action_adversarial
+        continue-on-error: true
+        uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e
+        with:
+          receipt: consumer-contract-cases/narrowed-required-components/receipt.json
+          artifact: dist/example-artifact.bin
+          evidence: consumer-contract-cases/narrowed-required-components/evidence.json
+          policy: strict-scanner-completeness
+      - name: Assert external Action outcomes
+        shell: bash
+        run: |
+          test "${{ steps.action_positive.outcome }}" = success
+          test "${{ steps.action_positive.outputs.decision }}" = pass
+          test "${{ steps.action_adversarial.outcome }}" = failure
+          test "${{ steps.action_adversarial.outputs.decision }}" != pass
+          echo "${{ steps.action_adversarial.outputs['reason-codes'] }}" | grep -F scanner_execution_required_components_mismatch
+      - name: Upload consumer-owned adversarial evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: consumer-contract-adversarial-${{ github.sha }}-core-${{ env.CORE_CANDIDATE_SHA }}
+          retention-days: 90
+          if-no-files-found: error
+          path: consumer-contract-cases

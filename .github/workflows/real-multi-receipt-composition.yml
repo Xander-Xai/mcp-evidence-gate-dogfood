@@ -17,8 +17,8 @@ jobs:
     env:
       PRODUCER_REVIEWED_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
       PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
-      CORE_REVIEWED_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
-      CORE_MERGE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+      CORE_REVIEWED_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
+      CORE_CANDIDATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
       TRIVY_VERSION: 0.74.0
       TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
@@ -86,8 +86,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
-          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_MERGE_SHA"
-          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_MERGE_SHA"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_CANDIDATE_SHA"
+          test "$(git -C "$RUNNER_TEMP/core" rev-parse HEAD)" = "$CORE_CANDIDATE_SHA"
           pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
           pnpm --dir "$RUNNER_TEMP/core" build
 
@@ -259,7 +259,7 @@ jobs:
               "producer_reviewed_commit": os.environ["PRODUCER_REVIEWED_SHA"],
               "producer_baseline_main_commit": os.environ["PRODUCER_BASELINE_MAIN_SHA"],
               "core_reviewed_commit": os.environ["CORE_REVIEWED_SHA"],
-              "core_merge_commit": os.environ["CORE_MERGE_SHA"],
+              "core_candidate_commit": os.environ["CORE_CANDIDATE_SHA"],
               "profile": profile,
               "policy": composition["policy"],
               "evaluated_at": composition["evaluatedAt"],
@@ -318,7 +318,7 @@ jobs:
             echo "| Producer reviewed commit | \`$PRODUCER_REVIEWED_SHA\` |"
             echo "| Producer baseline main | \`$PRODUCER_BASELINE_MAIN_SHA\` |"
             echo "| Core reviewed commit | \`$CORE_REVIEWED_SHA\` |"
-            echo "| Core merge commit | \`$CORE_MERGE_SHA\` |"
+            echo "| Core candidate commit | \`$CORE_CANDIDATE_SHA\` |"
             echo "| Artifact digest | \`$artifact_digest\` |"
             echo "| Trivy decision | \`$trivy_decision\` |"
             echo "| OSV decision | \`$osv_decision\` |"
@@ -409,7 +409,7 @@ jobs:
               "schema_version": "dogfood-strict-multi-receipt-runtime-evidence-v1",
               "dogfood_commit": os.environ["GITHUB_SHA"],
               "producer_reviewed_commit": os.environ["PRODUCER_REVIEWED_SHA"],
-              "core_commit": os.environ["CORE_MERGE_SHA"],
+              "core_commit": os.environ["CORE_CANDIDATE_SHA"],
               "receipt_set": receipt_set,
               "composition": composition,
               "strict_exit_code": int(strict_code),

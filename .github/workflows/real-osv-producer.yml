@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
-      GATE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+      GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
       OSV_VERSION: 2.5.1
       OSV_EXECUTABLE_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
 
@@ -251,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PRODUCER_SHA: 3b4862245ce1778d52d6a3b58f8b1b8cb4906dfb
-      GATE_SHA: 1c5a6cfae2901b97fc0925d0b102710d9a73cb82
+      GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
 
     steps:
       - uses: actions/checkout@v4

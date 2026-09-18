@@ -1,8 +1,8 @@
 # Producer snapshot TOCTOU Consumer Acceptance
 
 This Dogfood layer independently checks the promoted Producer main at
-`32eb55168b82991df689c943ae23fbb0ae6867dd` against promoted Core
-`52c224b36a54e450dbe25ad56988f29e4795753e`. The previously accepted
+`bffbd89f72cf71a047e7c1f15cae860719a8685e` against promoted Core
+`43a086cf2731cf3d7af322737c7f60b9017f02ab`. The previously accepted
 pre-merge Producer head `3462989a9f52a14e680e0c63b402beb84649f922` remains
 historical and is not an active runtime pin.
 

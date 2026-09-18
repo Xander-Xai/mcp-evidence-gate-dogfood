@@ -6,7 +6,7 @@ from pathlib import Path
 
 TRIVY = ["scanner_process", "scanner_output", "result_sections", "artifact_binding", "result_semantics"]
 OSV = ["scanner_process", "scanner_output", "result_sections", "source_binding", "result_semantics"]
-CORE = "52c224b36a54e450dbe25ad56988f29e4795753e"
+CORE = "43a086cf2731cf3d7af322737c7f60b9017f02ab"
 PROFILE = "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22"
 
 def write(path: Path, value):
@@ -56,6 +56,6 @@ def main():
         write(args.destination / name / "receipt.json", receipt)
         expected_status = "complete" if status == "complete" and reason is None else (status if status != "complete" else ("unverified" if reason == "scanner_version_missing" else ("contradictory" if reason == "scanner_execution_contradictory" or reason == "scanner_execution_required_components_mismatch" else "malformed")))
         write(args.destination / name / "expected.json", {"case":name,"core_sha":CORE,"profile":PROFILE,"expected_pass":reason is None and status=="complete" and verdict=="clean","expected_scanner_status":expected_status,"expected_reason":reason})
-    write(args.destination / "consumer-contract-adversarial-aggregate.json", {"schema_version":"dogfood-consumer-contract-adversarial-v1","core_candidate":CORE,"producer":"32eb55168b82991df689c943ae23fbb0ae6867dd","producer_historical_accepted_premerge":"3462989a9f52a14e680e0c63b402beb84649f922","registry_profile":PROFILE,"case_count":len(specs),"cases":sorted(specs)})
+    write(args.destination / "consumer-contract-adversarial-aggregate.json", {"schema_version":"dogfood-consumer-contract-adversarial-v1","core_candidate":CORE,"producer":"bffbd89f72cf71a047e7c1f15cae860719a8685e","producer_historical_accepted_premerge":"3462989a9f52a14e680e0c63b402beb84649f922","registry_profile":PROFILE,"case_count":len(specs),"cases":sorted(specs)})
 
 if __name__ == "__main__": main()

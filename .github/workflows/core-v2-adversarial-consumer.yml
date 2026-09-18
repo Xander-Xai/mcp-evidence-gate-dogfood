@@ -8,20 +8,20 @@ permissions:
   contents: read
 
 env:
-  CORE_CANDIDATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
-  PRODUCER_FROZEN_SHA: 32eb55168b82991df689c943ae23fbb0ae6867dd
+  CORE_CANDIDATE_SHA: 43a086cf2731cf3d7af322737c7f60b9017f02ab
+  PRODUCER_FROZEN_SHA: bffbd89f72cf71a047e7c1f15cae860719a8685e
   REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
 
 jobs:
   adversarial-matrix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.11' }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24 }
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with: { version: 10.33.4 }
       - name: Build consumer-owned contract fixtures
         run: python scripts/build_consumer_contract_cases.py "$GITHUB_WORKSPACE/consumer-contract-cases"
@@ -66,7 +66,7 @@ jobs:
           PY
       - name: External Action positive control
         id: action_positive
-        uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e
+        uses: Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab
         with:
           receipt: consumer-contract-cases/trivy-valid-complete/receipt.json
           artifact: dist/example-artifact.bin
@@ -75,7 +75,7 @@ jobs:
       - name: External Action narrowed-components rejection
         id: action_adversarial
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e
+        uses: Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab
         with:
           receipt: consumer-contract-cases/narrowed-required-components/receipt.json
           artifact: dist/example-artifact.bin
@@ -91,7 +91,7 @@ jobs:
           echo "${{ steps.action_adversarial.outputs['reason-codes'] }}" | grep -F scanner_execution_required_components_mismatch
       - name: Upload consumer-owned adversarial evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: consumer-contract-adversarial-${{ github.sha }}-core-${{ env.CORE_CANDIDATE_SHA }}
           retention-days: 90

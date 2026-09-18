@@ -88,6 +88,7 @@ jobs:
           pnpm --dir "$RUNNER_TEMP/core" build
       - name: Run real candidate Producer and promoted Core
         shell: bash
+        working-directory: ${{ runner.temp }}/producer
         run: |
           set -euo pipefail
           artifact="$GITHUB_WORKSPACE/evidence/real-trivy/requirements.txt"
@@ -138,10 +139,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input pytest
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_CANDIDATE_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_CANDIDATE_SHA"
-          python -m pytest -q "$RUNNER_TEMP/producer/tests/test_oci_identity.py" "$RUNNER_TEMP/producer/tests/test_oci_adapter.py" "$RUNNER_TEMP/producer/tests/test_oci_producer.py"
+          cd "$RUNNER_TEMP/producer"
+          python -m pytest -q tests/test_oci_identity.py tests/test_oci_adapter.py tests/test_oci_producer.py
       - name: Record non-regression result
         run: |
           mkdir -p "$RUNNER_TEMP/oci-composition"

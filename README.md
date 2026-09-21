@@ -24,8 +24,11 @@ The workflow uses `continue-on-error: true` for the Action step because `FAIL` a
 
 ## Scanner execution completeness
 
-Zero findings do not prove that a scanner completed. Current promoted Producer
-`Xander-Xai/mcp-evidence-producer-trivy@94403156c57059dcce3d224f9b4c321fee32445e`
+Zero findings do not prove that a scanner completed. Producer's accepted runtime
+pin is
+`Xander-Xai/mcp-evidence-producer-trivy@94403156c57059dcce3d224f9b4c321fee32445e`.
+The live Producer repository HEAD is not persisted as an acceptance identity in
+this repository; resolve it from GitHub when performing a repository-state audit.
 records the project-defined
 `scanner_execution` evidence extension. This repository adds a separate
 consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_completeness_policy.py):
@@ -43,8 +46,10 @@ missing/malformed/contradictory completeness, evidence-tampering, and a
 Producer-generated `Results=[]` case. It also invokes the real Producer on a
 consumer-owned clean artifact, then sends the retained evidence through the
 immutable Core Gate. Core's accepted runtime pin is
-`06567c840c1d68a4b45ff2d12d6e6c32898fff11`; Core repository HEAD is tracked
-separately and resolved dynamically. Its strict-scanner-completeness
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11`.
+The live Core repository HEAD is not persisted as an acceptance identity in
+this repository; resolve it from GitHub when performing a repository-state
+audit. Its strict-scanner-completeness
 policy blocks digest-bound incomplete execution, so a self-consistent
 false-clean case is now `CORE_CHANGE_VERIFIED`: Core and the dogfood consumer
 both refuse admission.
@@ -60,10 +65,15 @@ previous Core acceptance `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` are
 `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` remains historical only. Core PR #14
 pre-merge head `b8e39635350929e93d4f302d423ea551cd7da763` is retained as
 `PRE_MERGE_ACCEPTED_CORE_HEAD` and `SUPERSEDED AS ACTIVE IDENTITY`.
-Accepted Core runtime pin `06567c840c1d68a4b45ff2d12d6e6c32898fff11` is the active tested identity. Core repository HEAD is tracked separately; Core `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3`
+Accepted Core runtime pin `06567c840c1d68a4b45ff2d12d6e6c32898fff11` is the active tested identity. Core `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3`
 (PR #17 owner-metadata promotion) and `43a086cf2731cf3d7af322737c7f60b9017f02ab` are previous promoted mains;
 `52c224b36a54e450dbe25ad56988f29e4795753e` and pre-merge candidate
 `771bd2871147fe56a6ea911546ee0ddcaca01e9e` remain historical identities.
+
+In `governance/promotion-gates.json`, legacy `CURRENT` statuses mean the active
+accepted runtime identity for that generation, not the live repository HEAD.
+The live HEAD is queried only during a repository-state audit. `core_promoted_main`
+and `producer_promoted_main` are retained legacy names for these accepted pins.
 
 ## Workflow
 

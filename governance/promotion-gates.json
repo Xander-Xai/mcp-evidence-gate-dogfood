@@ -1,9 +1,7 @@
 {
   "schema_version": "promotion-gates-v1",
   "base_branch": "main",
-  "producer_repository_head": "94403156c57059dcce3d224f9b4c321fee32445e",
   "producer_accepted_runtime_pin": "94403156c57059dcce3d224f9b4c321fee32445e",
-  "core_repository_head": "c9f23acce5a496f219b01a42d4b8443c7db4c5f3",
   "core_accepted_runtime_pin": "06567c840c1d68a4b45ff2d12d6e6c32898fff11",
   "core_previous_runtime_pin": "8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3",
   "producer_promoted_main": "94403156c57059dcce3d224f9b4c321fee32445e",

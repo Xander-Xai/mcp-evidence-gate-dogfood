@@ -3,19 +3,22 @@
 Status: project-defined dogfood evidence. This document does not change the
 MCP Registry receipt schema or the Core Gate implementation.
 
-A3.2 promoted Core main is
-`43a086cf2731cf3d7af322737c7f60b9017f02ab`; this document preserves prior
-acceptance history while D1.3 repins active consumers to the promoted mains.
+The current promoted Core main is
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11`; this document preserves prior
+acceptance history while active consumers remain pinned to exact promoted SHAs.
 
 ## Scope and immutable inputs
 
 - Dogfood baseline `main`: `e9db561` (audited before modification).
 - Producer PR: `Xander-Xai/mcp-evidence-producer-trivy#4`.
-- Promoted Producer `main`: `bffbd89f72cf71a047e7c1f15cae860719a8685e` (CURRENT).
+- Promoted Producer `main`: `94403156c57059dcce3d224f9b4c321fee32445e` (CURRENT).
+- Previous promoted Producer `main`: `bffbd89f72cf71a047e7c1f15cae860719a8685e` (HISTORICAL).
 - Previous promoted Producer `main`: `32eb55168b82991df689c943ae23fbb0ae6867dd` (HISTORICAL).
 - Producer PR #4 pre-merge head: `575a1230290b610297152e44dc6dd5b6ac6c04e9` (SUPERSEDED AS ACTIVE IDENTITY).
 - Producer baseline `main`: `4c4d9bd476396cd7e34e9d4182900ac00b03d17b`.
-- Core promoted `main`: `43a086cf2731cf3d7af322737c7f60b9017f02ab` (CURRENT).
+- Core promoted `main`: `06567c840c1d68a4b45ff2d12d6e6c32898fff11` (CURRENT).
+- Previous promoted Core `main`: `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3` (HISTORICAL; PR #17 owner-metadata promotion).
+- Earlier promoted Core `main`: `43a086cf2731cf3d7af322737c7f60b9017f02ab` (HISTORICAL).
 - Previous promoted Core `main`: `52c224b36a54e450dbe25ad56988f29e4795753e` (HISTORICAL).
 - Core PR #15 accepted pre-merge head: `771bd2871147fe56a6ea911546ee0ddcaca01e9e` (historical, superseded by promoted main).
 - Core PR #14 pre-merge accepted head: `b8e39635350929e93d4f302d423ea551cd7da763` (PRE_MERGE_ACCEPTED_CORE_HEAD; SUPERSEDED AS ACTIVE IDENTITY).
@@ -25,7 +28,7 @@ acceptance history while D1.3 repins active consumers to the promoted mains.
   `registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22`.
 
 The active workflows use the promoted Core Action directly at
-`Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab` and,
+`Xander-Xai/mcp-evidence-gate@06567c840c1d68a4b45ff2d12d6e6c32898fff11` and,
 on the same fixture, compare it with the bundled `dist/action/index.cjs` from
 that exact checkout. The remote job asserts `REMOTE_ACTION_LOAD=PASS`, every
 declared Action output, and equality of the remote and bundled decisions,
@@ -92,7 +95,7 @@ than manufacturing a clean verdict.
 ## External Core P1/P2 acceptance
 
 `scripts/run_core_snapshot_acceptance.mjs` checks the exact built Core commit
-`43a086cf2731cf3d7af322737c7f60b9017f02ab` from an external consumer. P1
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11` from an external consumer. P1
 injects a reader that would return bytes A and then B, and asserts Core reads
 once and verifies the detached A snapshot for both binding and scanner
 semantics. P2 invokes the Core CLI boundary surface for:
@@ -150,8 +153,8 @@ path differs from the consumer artifact. It asserts Producer exit `1`, receipt
 Existing real OCI workflow assertions continue to require root index digest,
 selected platform descriptor, exact platform manifest bytes, selected digest
 binding, and complete scanner execution while checking out Producer
-`bffbd89f72cf71a047e7c1f15cae860719a8685e` and Core
-`43a086cf2731cf3d7af322737c7f60b9017f02ab`. Existing OSV workflow assertions
+`94403156c57059dcce3d224f9b4c321fee32445e` and Core
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11`. Existing OSV workflow assertions
 keep exit 0/1, package/source/lockfile, raw-result consistency, and the
 unavailable database snapshot boundary while requiring complete execution
 evidence; its additional source-binding mismatch job is a P2 negative
@@ -168,11 +171,11 @@ are retained as historical evidence and are `SUPERSEDED` because they used
 Producer `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` and did not include the
 `Results=[]` or OSV `source_binding` acceptance.
 
-The current acceptance is tied to the new Dogfood commit and the fresh
-workflow run/job IDs recorded in PR #12. Those runs must all target the same
-new Dogfood head, promoted Producer `bffbd89f72cf71a047e7c1f15cae860719a8685e`,
-and Core `43a086cf2731cf3d7af322737c7f60b9017f02ab`; local tests are supporting
-evidence rather than a substitute for the hosted run. The prior Dogfood head
+The PR #12 exact-head acceptance remains historical hosted evidence. Current
+active workflows are repinned to promoted Producer `94403156c57059dcce3d224f9b4c321fee32445e` and Core
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11`; hosted runs for the resulting Dogfood head are the current
+runtime acceptance evidence, while local tests remain supporting evidence rather
+than a substitute for hosted execution. The prior Dogfood head
 `a431faf84bd69a0d4ad79731ad8e7c29880c690e` and its old Producer/Core pins are
 `SUPERSEDED`.
 
@@ -185,8 +188,8 @@ promotion.
 The immediately previous PR #12 head `3600e62afc6596d2f9fb9ccbb0ad7b1ea1ba2a21`
 is retained as `SUPERSEDED_AS_ACTIVE_IDENTITY`.
 
-The promoted Core packaging check is `POST_MERGE_REMOTE_ACTION_LOAD = PASS`:
-the remote Action loaded `action.yml` and `dist/action/index.cjs` from promoted
+The historical PR #12 Core packaging check was `POST_MERGE_REMOTE_ACTION_LOAD = PASS`:
+the remote Action loaded `action.yml` and `dist/action/index.cjs` from then-promoted
 Core `43a086cf2731cf3d7af322737c7f60b9017f02ab`, and all ten declared outputs plus
 the remote-vs-bundled comparison were asserted successfully.
 
@@ -208,7 +211,7 @@ Fully deterministic fixtures retain their fixed timestamps for reproducibility.
 
 `CORE_CHANGE_VERIFIED = YES`.
 
-At promoted Core `43a086cf2731cf3d7af322737c7f60b9017f02ab`, strict-scanner-completeness
+At current promoted Core `06567c840c1d68a4b45ff2d12d6e6c32898fff11`, strict-scanner-completeness
 evaluation returns `pass` only for complete-clean evidence. A digest-bound
 false-clean, a Producer `Results=[]` receipt, and an OSV source-binding
 mismatch all return Core `fail` with scanner execution incomplete; the Dogfood

@@ -2,6 +2,7 @@ name: Core v2 Adversarial Consumer Acceptance
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 permissions:

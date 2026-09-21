@@ -16,19 +16,19 @@ jobs:
   real-osv-producer-consumer:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 32eb55168b82991df689c943ae23fbb0ae6867dd
-      GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
+      PRODUCER_SHA: bffbd89f72cf71a047e7c1f15cae860719a8685e
+      GATE_SHA: 43a086cf2731cf3d7af322737c7f60b9017f02ab
       OSV_VERSION: 2.5.1
       OSV_EXECUTABLE_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 
@@ -51,7 +51,7 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$PRODUCER_SHA"
 
       - name: Check out immutable Core action bundle
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Xander-Xai/mcp-evidence-gate
           ref: ${{ env.GATE_SHA }}
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload OSV runtime evidence bundle
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: real-osv-runtime-evidence-${{ github.sha }}
           retention-days: 90
@@ -252,21 +252,21 @@ jobs:
     name: OSV source_binding mismatch acceptance
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 32eb55168b82991df689c943ae23fbb0ae6867dd
-      GATE_SHA: 52c224b36a54e450dbe25ad56988f29e4795753e
+      PRODUCER_SHA: bffbd89f72cf71a047e7c1f15cae860719a8685e
+      GATE_SHA: 43a086cf2731cf3d7af322737c7f60b9017f02ab
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.33.4
 
@@ -439,7 +439,7 @@ jobs:
 
       - name: Upload source_binding acceptance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: real-osv-source-binding-${{ github.sha }}
           retention-days: 90

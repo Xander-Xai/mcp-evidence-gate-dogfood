@@ -1,12 +1,11 @@
 {
   "schema_version": "promotion-gates-v1",
   "base_branch": "main",
-  "producer_promoted_main": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+  "producer_promoted_main": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
   "producer_accepted_premerge_head": "3462989a9f52a14e680e0c63b402beb84649f922",
   "dogfood_premerge_producer_acceptance_head": "3077a2df228831e32ec08f83a2c8672e6040e71a",
-  "core_promoted_main": "52c224b36a54e450dbe25ad56988f29e4795753e",
+  "core_promoted_main": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
   "dogfood_promoted_base": "655a707737631d2b9b84f9c5d0a6ab26756bd5eb",
-  "core_promoted_main": "52c224b36a54e450dbe25ad56988f29e4795753e",
   "core_accepted_premerge_head": "771bd2871147fe56a6ea911546ee0ddcaca01e9e",
   "dogfood_premerge_core_acceptance_head": "e09bf948383890d04e23740992516ebf629f1728",
   "acceptance_evidence": {
@@ -29,6 +28,11 @@
         },
         {
           "sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+          "role": "previous promoted Producer main",
+          "status": "SUPERSEDED_BY_PROMOTED_MAIN"
+        },
+        {
+          "sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
           "role": "promoted Producer main",
           "status": "CURRENT"
         }
@@ -56,6 +60,11 @@
         },
         {
           "sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+          "role": "previous promoted Core main",
+          "status": "SUPERSEDED_BY_PROMOTED_MAIN"
+        },
+        {
+          "sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
           "role": "promoted Core main",
           "status": "CURRENT"
         }
@@ -79,7 +88,7 @@
     },
     "remote_core_action_consumer": {
       "workflow": ".github/workflows/mcp-evidence-gate.yml",
-      "uses": "Xander-Xai/mcp-evidence-gate@52c224b36a54e450dbe25ad56988f29e4795753e",
+      "uses": "Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "fixture": "evidence/clean/evidence-match-receipt.json + evidence/clean/evidence-report.json",
       "comparison": "remote Action versus bundled Action at the same Core commit",
       "promoted_main_strict_fixture": "producer-generated evidence/real-trivy/clean/requirements.txt",
@@ -100,21 +109,21 @@
     "core_snapshot_p1_p2_consumer": {
       "workflow": ".github/workflows/scanner-completeness-consumer.yml",
       "script": "scripts/run_core_snapshot_acceptance.mjs",
-      "core_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+      "core_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "p1": "single detached evidence snapshot under an injected A/B reader",
       "p2": ["no evidence path", "missing evidence file", "digest mismatch", "missing scanner object"]
     },
     "real_trivy_consumer": {
       "workflow": ".github/workflows/real-trivy-producer.yml",
-      "producer_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
-      "gate_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+    "producer_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
+      "gate_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "trivy_version": "0.74.0"
     },
     "real_osv_consumer": {
       "workflow": ".github/workflows/real-osv-producer.yml",
-      "producer_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+    "producer_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+      "gate_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "osv_version": "2.5.1",
       "osv_executable_sha256": "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be",
       "database_snapshot": "unavailable",
@@ -124,10 +133,10 @@
     "real_multi_receipt_composition": {
       "workflow": ".github/workflows/real-multi-receipt-composition.yml",
       "receipt_set_schema": "project-defined-receipt-set-v1",
-      "producer_reviewed_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+      "producer_reviewed_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-        "core_reviewed_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
-        "core_candidate_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+        "core_reviewed_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
+        "core_candidate_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "trivy_version": "0.74.0",
       "trivy_executable_sha256": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
       "osv_version": "2.5.1",
@@ -138,9 +147,9 @@
     "scanner_completeness_consumer": {
       "workflow": ".github/workflows/scanner-completeness-consumer.yml",
       "producer_pr": "Xander-Xai/mcp-evidence-producer-trivy#4",
-      "producer_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+      "producer_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "gate_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+      "gate_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "fixture": "evidence/scanner-completeness/zero-findings-incomplete/evidence.json",
       "expected_incomplete_admission": "blocked",
       "core_promotion_gate": "CORE_CHANGE_VERIFIED",
@@ -162,9 +171,9 @@
         "status": "superseded",
         "external_run_ids": ["35060811762", "35060812185"]
       },
-      "current_acceptance": {
-        "producer_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
-        "core_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+        "current_acceptance": {
+        "producer_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
+        "core_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
         "status": "accepted",
         "hosted_acceptance": "PASS",
         "hosted_acceptance_evidence": "Runtime evaluation timestamp closure is implemented and the final exact-head hosted suite is recorded in PR #12; the six required workflows must continue to match the resulting head SHA."
@@ -172,9 +181,9 @@
     },
     "real_oci_exact_identity": {
       "workflow": ".github/workflows/real-oci-identity.yml",
-      "producer_reviewed_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+      "producer_reviewed_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
       "producer_baseline_main_sha": "4c4d9bd476396cd7e34e9d4182900ac00b03d17b",
-      "core_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+      "core_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
       "trivy_version": "0.74.0",
       "root_ref": "ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
       "root_index_digest": "sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82",
@@ -194,15 +203,16 @@
       "scanner_completeness_consumer",
       "consumer_owned_contract_adversarial_matrix",
       "producer_artifact_snapshot_external_acceptance",
-      "remote_core_action_consumer"
+      "remote_core_action_consumer",
+      "ci_hygiene"
     ]
   },
   "producer_artifact_snapshot_external_acceptance": {
     "required": true,
     "workflow": ".github/workflows/producer-snapshot-toctou-consumer.yml",
-    "producer_sha": "32eb55168b82991df689c943ae23fbb0ae6867dd",
+    "producer_sha": "bffbd89f72cf71a047e7c1f15cae860719a8685e",
     "producer_historical_accepted_premerge_head": "3462989a9f52a14e680e0c63b402beb84649f922",
-    "core_sha": "52c224b36a54e450dbe25ad56988f29e4795753e",
+    "core_sha": "43a086cf2731cf3d7af322737c7f60b9017f02ab",
     "invariants": [
       "trivy_source_replacement_reads_snapshot_A",
       "osv_source_replacement_reads_snapshot_A",

@@ -127,6 +127,27 @@ jobs:
           assert identity["root"]["digest"] == root_digest == digest(out / "oci.index.json")
           assert root_digest != platform_digest
 
+          # Independently re-select linux/amd64 from the retained index bytes.
+          # Do not trust the producer-generated identity record for this relation.
+          index = load(out / "oci.index.json")
+          descriptors = index.get("manifests")
+          assert isinstance(descriptors, list)
+          matches = [
+              descriptor
+              for descriptor in descriptors
+              if isinstance(descriptor, dict)
+              and isinstance(descriptor.get("platform"), dict)
+              and descriptor["platform"].get("os") == "linux"
+              and descriptor["platform"].get("architecture") == "amd64"
+              and descriptor["platform"].get("variant") in (None, "")
+          ]
+          assert len(matches) == 1
+          descriptor = matches[0]
+          assert descriptor["digest"] == platform_digest
+          assert descriptor["size"] == (out / "oci.manifest.json").stat().st_size
+          assert descriptor["mediaType"] == "application/vnd.oci.image.manifest.v1+json"
+          assert descriptor["digest"] == digest(out / "oci.manifest.json")
+
           selected = identity["selected"]
           assert selected["selection_source"] == "image-index"
           assert selected["platform"] == {"os": "linux", "architecture": "amd64"}

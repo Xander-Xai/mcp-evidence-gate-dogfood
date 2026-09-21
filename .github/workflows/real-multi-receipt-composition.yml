@@ -15,7 +15,7 @@ jobs:
   real-multi-receipt-composition:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_REVIEWED_SHA: 12dc756ddda7789081d58854b9b2c45587457513
+      PRODUCER_REVIEWED_SHA: 94403156c57059dcce3d224f9b4c321fee32445e
       PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
       CORE_REVIEWED_SHA: 8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
       CORE_CANDIDATE_SHA: 8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3

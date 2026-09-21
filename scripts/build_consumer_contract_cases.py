@@ -56,6 +56,6 @@ def main():
         write(args.destination / name / "receipt.json", receipt)
         expected_status = "complete" if status == "complete" and reason is None else (status if status != "complete" else ("unverified" if reason == "scanner_version_missing" else ("contradictory" if reason == "scanner_execution_contradictory" or reason == "scanner_execution_required_components_mismatch" else "malformed")))
         write(args.destination / name / "expected.json", {"case":name,"core_sha":CORE,"profile":PROFILE,"expected_pass":reason is None and status=="complete" and verdict=="clean","expected_scanner_status":expected_status,"expected_reason":reason})
-    write(args.destination / "consumer-contract-adversarial-aggregate.json", {"schema_version":"dogfood-consumer-contract-adversarial-v1","core_candidate":CORE,"producer":"e40fcac43be46c551a434cc542b4766b6ec067bf","producer_historical_accepted_premerge":"3462989a9f52a14e680e0c63b402beb84649f922","registry_profile":PROFILE,"case_count":len(specs),"cases":sorted(specs)})
+    write(args.destination / "consumer-contract-adversarial-aggregate.json", {"schema_version":"dogfood-consumer-contract-adversarial-v1","core_candidate":CORE,"producer":"94403156c57059dcce3d224f9b4c321fee32445e","producer_historical_accepted_premerge":"3462989a9f52a14e680e0c63b402beb84649f922","registry_profile":PROFILE,"case_count":len(specs),"cases":sorted(specs)})
 
 if __name__ == "__main__": main()

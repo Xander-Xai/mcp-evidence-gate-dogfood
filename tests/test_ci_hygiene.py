@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from scripts.check_action_pins import validate_workflow_text, validate_tree
+from scripts.check_action_pins import semantic_action_refs, validate_workflow_text, validate_tree
 
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -41,6 +41,40 @@ jobs:
 """
         errors = validate_workflow_text(text)
         self.assertEqual(len(errors), 2)
+
+    def test_multifield_step_refs_are_validated(self):
+        text = f"""
+jobs:
+  test:
+    steps:
+      - name: vulnerable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+      - name: pinned
+        uses: actions/upload-artifact@{SHA}
+      - id: identified
+        uses: actions/checkout@{SHA}
+"""
+        errors = validate_workflow_text(text)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("external Action must use", errors[0])
+
+    def test_real_multifield_action_is_discovered(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = root / ".github" / "workflows" / "real-multi-receipt-composition.yml"
+        refs = semantic_action_refs(workflow.read_text(encoding="utf-8"), str(workflow))
+        upload_refs = [(location, ref) for location, ref in refs if "actions/upload-artifact@" in ref]
+        self.assertTrue(upload_refs)
+        self.assertTrue(any(ref.startswith("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02") for _, ref in upload_refs))
+
+    def test_mutated_real_multifield_action_is_rejected(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = root / ".github" / "workflows" / "real-multi-receipt-composition.yml"
+        text = workflow.read_text(encoding="utf-8")
+        mutated = text.replace("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "actions/upload-artifact@v4", 1)
+        self.assertTrue(validate_workflow_text(mutated, "mutated-workflow"))
 
     def test_false_positive_data_keys_are_ignored(self):
         text = """

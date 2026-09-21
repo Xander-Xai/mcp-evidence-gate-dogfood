@@ -36,6 +36,8 @@ def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str,
     in_jobs = False
     current_job: str | None = None
     in_steps = False
+    step_indent: int | None = None
+    step_active = False
     for number, raw in enumerate(text.splitlines(), 1):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
@@ -45,6 +47,8 @@ def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str,
             in_jobs = True
             current_job = None
             in_steps = False
+            step_indent = None
+            step_active = False
             continue
         if not in_jobs:
             continue
@@ -52,10 +56,14 @@ def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str,
             in_jobs = False
             current_job = None
             in_steps = False
+            step_indent = None
+            step_active = False
             continue
         if indent == 2 and stripped.endswith(":") and not stripped.startswith("-"):
             current_job = stripped[:-1].strip(" '\"")
             in_steps = False
+            step_indent = None
+            step_active = False
             continue
         if current_job is None:
             continue
@@ -64,11 +72,32 @@ def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str,
             continue
         if indent == 4 and stripped == "steps:":
             in_steps = True
+            step_indent = None
+            step_active = False
             continue
         if indent == 4 and stripped and not stripped.startswith("#"):
             in_steps = False
-        if in_steps and indent == 6 and stripped.startswith("- uses:"):
+            step_indent = None
+            step_active = False
+            continue
+        if not in_steps:
+            continue
+        if step_indent is None and indent > 4 and stripped.startswith("-"):
+            step_indent = indent
+            step_active = True
+        elif step_indent is not None and indent == step_indent and stripped.startswith("-"):
+            step_active = True
+        elif step_indent is not None and indent < step_indent:
+            in_steps = False
+            step_indent = None
+            step_active = False
+            continue
+        if not step_active or step_indent is None:
+            continue
+        if stripped.startswith("- uses:") and indent == step_indent:
             refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[8:].strip())))
+        elif indent == step_indent + 2 and stripped.startswith("uses:"):
+            refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[6:].strip())))
     return refs
 
 

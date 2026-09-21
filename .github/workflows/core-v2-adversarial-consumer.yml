@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  CORE_CANDIDATE_SHA: 43a086cf2731cf3d7af322737c7f60b9017f02ab
-  PRODUCER_FROZEN_SHA: bffbd89f72cf71a047e7c1f15cae860719a8685e
+  CORE_CANDIDATE_SHA: 8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
+  PRODUCER_FROZEN_SHA: 12dc756ddda7789081d58854b9b2c45587457513
   REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
 
 jobs:
@@ -67,7 +67,7 @@ jobs:
           PY
       - name: External Action positive control
         id: action_positive
-        uses: Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab
+        uses: Xander-Xai/mcp-evidence-gate@8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
         with:
           receipt: consumer-contract-cases/trivy-valid-complete/receipt.json
           artifact: dist/example-artifact.bin
@@ -76,7 +76,7 @@ jobs:
       - name: External Action narrowed-components rejection
         id: action_adversarial
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@43a086cf2731cf3d7af322737c7f60b9017f02ab
+        uses: Xander-Xai/mcp-evidence-gate@8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
         with:
           receipt: consumer-contract-cases/narrowed-required-components/receipt.json
           artifact: dist/example-artifact.bin

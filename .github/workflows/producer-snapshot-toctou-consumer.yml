@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_PROMOTED_SHA: 12dc756ddda7789081d58854b9b2c45587457513
+  PRODUCER_PROMOTED_SHA: e40fcac43be46c551a434cc542b4766b6ec067bf
   CORE_PROMOTED_SHA: 8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
   DOGFOOD_BASE_SHA: 655a707737631d2b9b84f9c5d0a6ab26756bd5eb
   REGISTRY_PROFILE: registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22
@@ -48,7 +48,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: producer-snapshot-toctou-${{ github.sha }}-producer-12dc756d
+          name: producer-snapshot-toctou-${{ github.sha }}-producer-e40fcac4
           retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/b2
@@ -121,7 +121,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: producer-snapshot-real-${{ github.sha }}-producer-12dc756d
+          name: producer-snapshot-real-${{ github.sha }}-producer-e40fcac4
           retention-days: 90
           if-no-files-found: error
           path: |
@@ -185,7 +185,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: producer-snapshot-oci-composition-${{ github.sha }}-producer-12dc756d
+          name: producer-snapshot-oci-composition-${{ github.sha }}-producer-e40fcac4
           retention-days: 90
           if-no-files-found: error
           path: ${{ runner.temp }}/oci-composition

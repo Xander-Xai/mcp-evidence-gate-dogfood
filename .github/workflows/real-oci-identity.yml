@@ -14,7 +14,7 @@ jobs:
   real-oci-identity:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_REVIEWED_SHA: 12dc756ddda7789081d58854b9b2c45587457513
+      PRODUCER_REVIEWED_SHA: e40fcac43be46c551a434cc542b4766b6ec067bf
       PRODUCER_BASELINE_MAIN_SHA: 4c4d9bd476396cd7e34e9d4182900ac00b03d17b
       CORE_SHA: 8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3
       ROOT_REF: ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82
@@ -126,6 +126,27 @@ jobs:
           assert identity["requested_reference_kind"] == "digest"
           assert identity["root"]["digest"] == root_digest == digest(out / "oci.index.json")
           assert root_digest != platform_digest
+
+          # Independently re-select linux/amd64 from the retained index bytes.
+          # Do not trust the producer-generated identity record for this relation.
+          index = load(out / "oci.index.json")
+          descriptors = index.get("manifests")
+          assert isinstance(descriptors, list)
+          matches = [
+              descriptor
+              for descriptor in descriptors
+              if isinstance(descriptor, dict)
+              and isinstance(descriptor.get("platform"), dict)
+              and descriptor["platform"].get("os") == "linux"
+              and descriptor["platform"].get("architecture") == "amd64"
+              and descriptor["platform"].get("variant") in (None, "")
+          ]
+          assert len(matches) == 1
+          descriptor = matches[0]
+          assert descriptor["digest"] == platform_digest
+          assert descriptor["size"] == (out / "oci.manifest.json").stat().st_size
+          assert descriptor["mediaType"] == "application/vnd.oci.image.manifest.v1+json"
+          assert descriptor["digest"] == digest(out / "oci.manifest.json")
 
           selected = identity["selected"]
           assert selected["selection_source"] == "image-index"

@@ -58,7 +58,7 @@ previous Core acceptance `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` are
 `SUPERSEDED` active identities; the earlier Producer acceptance at
 `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` remains historical only. Core PR #14
 pre-merge head `b8e39635350929e93d4f302d423ea551cd7da763` is retained as
-`PRE_MERGE_ACCEPTED_CORE_HEAD` and `SUPERSEDED AS ACTIVE IDENTITY`; promoted
+`PRE_MERGE_ACCEPTED_CORE_HEAD` and `SUPERSEDED AS ACTIVE IDENTITY`.
 Promoted Core main `06567c840c1d68a4b45ff2d12d6e6c32898fff11` is the current active identity. Core `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3`
 (PR #17 owner-metadata promotion) and `43a086cf2731cf3d7af322737c7f60b9017f02ab` are previous promoted mains;
 `52c224b36a54e450dbe25ad56988f29e4795753e` and pre-merge candidate

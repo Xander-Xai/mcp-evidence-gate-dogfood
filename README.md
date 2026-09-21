@@ -32,7 +32,7 @@ consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_co
 an evidence file must be digest-bound and have complete required execution
 evidence before it is eligible for Core Gate evaluation.
 
-The producer-generated clean job also sends that promoted-main output through
+The producer-generated clean job also sends that accepted runtime-pin output through
 the remote Core Action with `strict-scanner-completeness` and asserts
 `decision=pass`, `integrity-status=pass`, `receipt-status=valid`, and
 `scanner-execution-status=complete` against the bundled CLI result.
@@ -42,8 +42,9 @@ executes complete-clean, complete-findings, incomplete/failed zero-findings,
 missing/malformed/contradictory completeness, evidence-tampering, and a
 Producer-generated `Results=[]` case. It also invokes the real Producer on a
 consumer-owned clean artifact, then sends the retained evidence through the
-immutable Core Gate. Core is pinned at current promoted `main`
-`06567c840c1d68a4b45ff2d12d6e6c32898fff11` and its strict-scanner-completeness
+immutable Core Gate. Core's accepted runtime pin is
+`06567c840c1d68a4b45ff2d12d6e6c32898fff11`; Core repository HEAD is tracked
+separately and resolved dynamically. Its strict-scanner-completeness
 policy blocks digest-bound incomplete execution, so a self-consistent
 false-clean case is now `CORE_CHANGE_VERIFIED`: Core and the dogfood consumer
 both refuse admission.
@@ -59,7 +60,7 @@ previous Core acceptance `c5467b94d9bc80c4728cceabfe567ef78ff1fa0c` are
 `deb5c2cf225f8043b133e5bf1a39813c4c65f6c1` remains historical only. Core PR #14
 pre-merge head `b8e39635350929e93d4f302d423ea551cd7da763` is retained as
 `PRE_MERGE_ACCEPTED_CORE_HEAD` and `SUPERSEDED AS ACTIVE IDENTITY`.
-Promoted Core main `06567c840c1d68a4b45ff2d12d6e6c32898fff11` is the current active identity. Core `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3`
+Accepted Core runtime pin `06567c840c1d68a4b45ff2d12d6e6c32898fff11` is the active tested identity. Core repository HEAD is tracked separately; Core `8c6d19b9ad90d6f066fa6fd1f41d0a8da3b017f3`
 (PR #17 owner-metadata promotion) and `43a086cf2731cf3d7af322737c7f60b9017f02ab` are previous promoted mains;
 `52c224b36a54e450dbe25ad56988f29e4795753e` and pre-merge candidate
 `771bd2871147fe56a6ea911546ee0ddcaca01e9e` remain historical identities.

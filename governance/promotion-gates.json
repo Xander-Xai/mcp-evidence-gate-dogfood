@@ -217,9 +217,9 @@
       "current_acceptance": {
         "producer_sha": "94403156c57059dcce3d224f9b4c321fee32445e",
         "core_sha": "06567c840c1d68a4b45ff2d12d6e6c32898fff11",
-        "status": "accepted",
-        "hosted_acceptance": "PASS",
-        "hosted_acceptance_evidence": "Runtime evaluation timestamp closure is implemented and the final exact-head hosted suite is recorded in PR #12; the six required workflows must continue to match the resulting head SHA."
+        "status": "accepted_if_pr_22_exact_head_checks_pass",
+        "hosted_acceptance": "PR_22_REQUIRED",
+        "hosted_acceptance_evidence": "PR #12 remains historical acceptance for earlier pins. PR #22 must pass the full exact-head Dogfood promotion gate and independent consumer workflows against Producer 94403156c57059dcce3d224f9b4c321fee32445e and Core 06567c840c1d68a4b45ff2d12d6e6c32898fff11 before merge."
       }
     },
     "real_oci_exact_identity": {

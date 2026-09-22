@@ -58,12 +58,13 @@ jobs:
           git clone --depth 1 https://github.com/Xander-Xai/cytoscape-desktop-mcp.git "$dir" >"$out/clone.log" 2>&1
           if [ $? -eq 0 ]; then
             (cd "$dir" && make build_claude_mcpb && cp build/cytoscape-mcp.mcpb "$out/cytoscape-mcp.mcpb" && VER=$(jq -r '.version' claude-extension/manifest.json) && make stage-npm-bridge TAG="mcpb-v$VER" && (cd build/npm-staging && npm pack --silent) && cp build/npm-staging/*.tgz "$out/bridge.tgz") >"$out/build.log" 2>&1
+            if [ $? -ne 0 ]; then echo '--- Cytoscape MCPB build log ---' >&2; cat "$out/build.log" >&2 || true; fi
           fi
           for artifact in "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/*.mcpb "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/bridge.tgz; do
             [ -f "$artifact" ] || continue; echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" >> "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/artifact.sha256"
           done
           if [ ! -f "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/cytoscape-mcp.mcpb" ]; then
-            echo '{"repo":"cytoscape-desktop-mcp","artifact":"build/cytoscape-mcp.mcpb","classification":"HARNESS_FAILURE","reason":"mcpb_build_or_capture_failed","tamper":"not_applicable_no_artifact"}' > "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/mcpb-result.json"
+            echo '{"repo":"cytoscape-desktop-mcp","artifact":"build/cytoscape-mcp.mcpb","classification":"HARNESS_FAILURE","reason":"mcpb_build_or_capture_failed","tamper":"not_applicable_no_artifact"}' > "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/result-mcpb.json"
           fi
       - name: Run promoted Producer, Core, and tamper controls
         shell: bash
@@ -88,7 +89,7 @@ jobs:
           elif coverage=='targets_present' and execution=='complete' and verdict=='findings': cls='COMPATIBLE_FINDINGS'
           elif coverage=='targets_present' and execution=='complete' and verdict=='clean': cls='COMPATIBLE_CLEAN'
           elif coverage=='targets_present' and execution=='incomplete': cls='COMPATIBLE_FAIL_CLOSED_INCOMPLETE'
-          elif ev.get('scan_input',{}).get('kind')!='producer-owned-package-archive-view' and out.name.startswith('out-cytoscape-mcpb'): cls='ARTIFACT_TYPE_UNSUPPORTED'
+          elif ev.get('scan_input',{}).get('kind')!='producer-owned-package-archive-view' and out.name.startswith('out-cytoscape-mcp'): cls='ARTIFACT_TYPE_UNSUPPORTED'
           else: cls='HARNESS_FAILURE' if code not in (0,1) else 'UNCLASSIFIED'
           json.dump({'repo':repo,'artifact':artifact,'artifact_sha256':artifact_sha,'classification':cls,'coverage':coverage,'execution':execution,'receipt':verdict,'core_decision':core.get('decision'),'tamper_decision':tam.get('decision'),'tamper_reason_codes':tam.get('reason_codes',[])},open(out/'result.json','w'),indent=2)
           PY

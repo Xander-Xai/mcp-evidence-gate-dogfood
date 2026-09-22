@@ -35,8 +35,8 @@ jobs:
           curl -fsSL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" -o "$RUNNER_TEMP/syft/syft.tar.gz"
           echo "${SYFT_TAR_SHA256}  $RUNNER_TEMP/syft/syft.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/syft/syft.tar.gz" -C "$RUNNER_TEMP/syft"
-          curl -fsSL -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://ghcr.io/v2/${SECOND_REPO}/manifests/${SECOND_DIGEST}" -o "$RUNNER_TEMP/oci/second.json"
-          curl -fsSL -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' "https://ghcr.io/v2/ibm/mcp-context-forge/manifests/${OTHER_DIGEST}" -o "$RUNNER_TEMP/oci/other.json"
+          docker buildx imagetools inspect --raw "$SECOND_REF" > "$RUNNER_TEMP/oci/second.json"
+          docker buildx imagetools inspect --raw "$OTHER_REF" > "$RUNNER_TEMP/oci/other.json"
           test "sha256:$(sha256sum "$RUNNER_TEMP/oci/second.json" | cut -d' ' -f1)" = "$SECOND_DIGEST"
           test "sha256:$(sha256sum "$RUNNER_TEMP/oci/other.json" | cut -d' ' -f1)" = "$OTHER_DIGEST"
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"

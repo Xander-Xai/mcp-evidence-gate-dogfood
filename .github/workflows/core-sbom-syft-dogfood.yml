@@ -56,7 +56,8 @@ jobs:
           const envelope=(sbomBytes=sbom, relationshipArtifact=artifactDigest)=>({schema_version:'project-defined-sbom-evidence-v1',artifact:{ref:'syft_1.52.0_linux_amd64.tar.gz',sha256:artifactDigest,size:artifact.length},sbom:{format:'syft-json',schema_version:'16.1.3',sha256:digest(sbomBytes),size:sbomBytes.length},relationship:{type:'generated-from',artifact_sha256:relationshipArtifact,sbom_sha256:digest(sbomBytes),binding:'exact-artifact'},inventory:{status:'present',package_count:JSON.parse(sbom.toString()).artifacts.length}});
           const a=await verifySbomEvidence(artifactPath,envelope(),sbom);
           const tampered=Buffer.concat([sbom,Buffer.from('\n')]);
-          const b=await verifySbomEvidence(artifactPath,envelope(tampered),tampered);
+          const tamperedEnvelope=envelope(sbom);
+          const b=await verifySbomEvidence(artifactPath,tamperedEnvelope,tampered);
           const c=await verifySbomEvidence(artifactPath,envelope(sbom,'sha256:'+'0'.repeat(64)),sbom);
           const malformed=Buffer.from('{');
           const d=await verifySbomEvidence(artifactPath,envelope(malformed),malformed);

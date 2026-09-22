@@ -97,11 +97,32 @@ jobs:
           cp "$RUNNER_TEMP/package-lock.tgz" "$RUNNER_TEMP/tampered.tgz"
           printf x >> "$RUNNER_TEMP/tampered.tgz"
           test "$(sha256sum "$RUNNER_TEMP/package-lock.tgz" | cut -d' ' -f1)" != "$(sha256sum "$RUNNER_TEMP/tampered.tgz" | cut -d' ' -f1)"
+      - name: Run immutable Core result checks
+        shell: bash
+        run: |
+          set +e
+          for name in package-lock shrinkwrap; do
+            node "$RUNNER_TEMP/core/dist/cli.js" verify \
+              --receipt "$RUNNER_TEMP/out-$name/receipt.json" \
+              --artifact "$RUNNER_TEMP/$name.tgz" \
+              --evidence "$RUNNER_TEMP/out-$name/evidence.json" \
+              --policy strict-scanner-completeness --format json \
+              --now 2026-09-22T00:00:00Z > "$RUNNER_TEMP/core-$name.json"
+            echo "$name core_exit=$?"
+          done
+          node "$RUNNER_TEMP/core/dist/cli.js" verify \
+            --receipt "$RUNNER_TEMP/out-package-lock/receipt.json" \
+            --artifact "$RUNNER_TEMP/tampered.tgz" \
+            --evidence "$RUNNER_TEMP/out-package-lock/evidence.json" \
+            --policy strict-scanner-completeness --format json \
+            --now 2026-09-22T00:00:00Z > "$RUNNER_TEMP/core-tampered.json"
+          echo "tampered core_exit=$?"
+          set -e
       - name: Assert semantic proof and write Core result summary
         shell: bash
         run: |
           set -euo pipefail
-          python - "$RUNNER_TEMP/out-package-lock/evidence.json" "$RUNNER_TEMP/out-shrinkwrap/evidence.json" "$RUNNER_TEMP/proof-summary.json" <<'PY'
+          python - "$RUNNER_TEMP/out-package-lock/evidence.json" "$RUNNER_TEMP/out-shrinkwrap/evidence.json" "$RUNNER_TEMP/proof-summary.json" "$RUNNER_TEMP/core-package-lock.json" "$RUNNER_TEMP/core-shrinkwrap.json" "$RUNNER_TEMP/core-tampered.json" <<'PY'
           import json,sys
           a=json.load(open(sys.argv[1])); c=json.load(open(sys.argv[2]))
           assert a['scan_coverage']['status']=='targets_present'
@@ -110,6 +131,10 @@ jobs:
           assert a['scanner_execution']['completed_components']
           assert c['scan_coverage']['status']=='no_supported_targets'
           assert c['scanner_execution']['completeness_status']=='complete'
+          for path in sys.argv[4:]:
+              json.load(open(path))
+          tampered=json.load(open(sys.argv[6]))
+          assert 'evidence_digest_mismatch' in str(tampered)
           assert not json.load(open(sys.argv[2].replace('evidence.json','trivy.raw.json'))).get('Results')
           json.dump({'producer_sha':'d878f37640cd656382a166f3c5310d276a196b0b','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'no_supported_targets_no_results'},open(sys.argv[3],'w'),indent=2)
           PY
@@ -123,3 +148,6 @@ jobs:
             ${{ runner.temp }}/out-shrinkwrap/**
             ${{ runner.temp }}/out-missing/**
             ${{ runner.temp }}/proof-summary.json
+            ${{ runner.temp }}/core-package-lock.json
+            ${{ runner.temp }}/core-shrinkwrap.json
+            ${{ runner.temp }}/core-tampered.json

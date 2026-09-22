@@ -1,0 +1,123 @@
+name: Package archive supported-target proof
+
+on:
+  push:
+    paths: [.github/workflows/package-archive-supported-target-proof.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRODUCER_SHA: f657337263742cc0e83a5ebe81240f99698ce312
+  CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
+  TRIVY_VERSION: 0.74.0
+  TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+  TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.11'}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: 24}
+      - name: Fetch immutable Producer, Core, and Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tar.gz" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_ARCHIVE_SHA256  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP"
+          echo "$TRIVY_EXECUTABLE_SHA256  $RUNNER_TEMP/trivy" | sha256sum --check --strict
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_SHA"
+          corepack enable
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Build deterministic package-lock and shrinkwrap archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<PY
+          import gzip, hashlib, io, json, tarfile
+          from pathlib import Path
+          root=Path("$RUNNER_TEMP")
+          for name, lock in [("package-lock", "package-lock.json"), ("shrinkwrap", "npm-shrinkwrap.json")]:
+              payload={"name":"proof-fixture","version":"1.0.0","lockfileVersion":3,"requires":True,"packages":{"":{"name":"proof-fixture","version":"1.0.0","dependencies":{"lodash":"4.17.21"}},"node_modules/lodash":{"version":"4.17.21","resolved":"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"}}}
+              out=root/f"{name}.tgz"
+              with out.open("wb") as raw, gzip.GzipFile(fileobj=raw,mode="wb",mtime=0) as gz, tarfile.open(fileobj=gz,mode="w:") as tar:
+                  for rel, data in [("package/package.json",b'{"name":"proof-fixture","version":"1.0.0","dependencies":{"lodash":"4.17.21"}}\n'), (f"package/{lock}", (json.dumps(payload,separators=(",",":"),sort_keys=True)+"\n").encode())]:
+                      info=tarfile.TarInfo(rel); info.size=len(data); info.mode=0o644; info.mtime=0; tar.addfile(info,io.BytesIO(data))
+              print(name, hashlib.sha256(out.read_bytes()).hexdigest())
+          PY
+      - name: A and C real pinned Trivy runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in package-lock shrinkwrap; do
+            mkdir -p "$RUNNER_TEMP/out-$name"
+            set +e
+            (cd "$RUNNER_TEMP/producer" && python -m src.producer --trivy "$RUNNER_TEMP/trivy" --artifact "$RUNNER_TEMP/$name.tgz" --out "$RUNNER_TEMP/out-$name")
+            code=$?
+            set -e
+            echo "$name exit=$code"
+            test "$code" = 0
+          done
+      - name: B controlled missing-Results negative control
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$RUNNER_TEMP/producer" "$RUNNER_TEMP/package-lock.tgz" "$RUNNER_TEMP/out-missing" <<'PY'
+          import json, pathlib, subprocess, sys
+          root, artifact, out = map(pathlib.Path, sys.argv[1:]); out.mkdir()
+          sys.path.insert(0,str(root)); import src.producer as p
+          real_sha=p.sha256; p.sha256=lambda path: p.PINNED_TRIVY_SHA256['linux'] if path.name=='trivy' else real_sha(path)
+          p.trivy_version=lambda _: '0.74.0'
+          def fake(argv, **kwargs):
+              pathlib.Path(argv[argv.index('--output')+1]).write_text(json.dumps({'SchemaVersion':2,'ArtifactName':argv[-1],'Trivy':{'Version':'0.74.0'},'Results':None}))
+              return subprocess.CompletedProcess(argv,0,'','')
+          p.subprocess.run=fake
+          assert p.run('/tmp/trivy', artifact, out)==1
+          evidence=json.loads((out/'evidence.json').read_text())
+          assert evidence['scan_coverage']['status']=='targets_present'
+          assert evidence['scanner_execution']['completeness_status']=='incomplete'
+          assert evidence['scanner_execution']['completeness_reason']=='supported_target_result_missing'
+          assert json.loads((out/'receipt.json').read_text())['verdict']=='inconclusive'
+          PY
+      - name: D tamper original archive and record digest control
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/package-lock.tgz" "$RUNNER_TEMP/tampered.tgz"
+          printf x >> "$RUNNER_TEMP/tampered.tgz"
+          test "$(sha256sum "$RUNNER_TEMP/package-lock.tgz" | cut -d' ' -f1)" != "$(sha256sum "$RUNNER_TEMP/tampered.tgz" | cut -d' ' -f1)"
+      - name: Assert semantic proof and write Core result summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$RUNNER_TEMP/out-package-lock/evidence.json" "$RUNNER_TEMP/out-shrinkwrap/evidence.json" "$RUNNER_TEMP/proof-summary.json" <<'PY'
+          import json,sys
+          a=json.load(open(sys.argv[1])); c=json.load(open(sys.argv[2]))
+          assert a['scan_coverage']['status']=='targets_present'
+          assert a['scanner_execution']['completeness_status']=='complete'
+          assert a['scanner_execution']['result_semantics_consistent'] is True
+          assert a['scanner_execution']['completed_components']
+          assert c['scan_coverage']['status']=='targets_present'
+          assert c['scanner_execution']['completeness_status']=='complete'
+          json.dump({'producer_sha':'f657337263742cc0e83a5ebe81240f99698ce312','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'complete_results'},open(sys.argv[3],'w'),indent=2)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-archive-supported-target-proof
+          path: |
+            ${{ runner.temp }}/package-lock.tgz
+            ${{ runner.temp }}/shrinkwrap.tgz
+            ${{ runner.temp }}/out-package-lock/**
+            ${{ runner.temp }}/out-shrinkwrap/**
+            ${{ runner.temp }}/out-missing/**
+            ${{ runner.temp }}/proof-summary.json

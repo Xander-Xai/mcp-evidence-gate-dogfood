@@ -26,6 +26,9 @@ jobs:
           cat > "$RUNNER_TEMP/fixture/package-lock.json" <<'JSON'
           {"name":"mcp-evidence-fixture","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"mcp-evidence-fixture","version":"1.0.0"}}}
           JSON
+          cat > "$RUNNER_TEMP/fixture/npm-shrinkwrap.json" <<'JSON'
+          {"name":"mcp-evidence-fixture","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"mcp-evidence-fixture","version":"1.0.0","dependencies":{"lodash":"4.17.15"}},"node_modules/lodash":{"version":"4.17.15","resolved":"https://registry.npmjs.org/lodash/-/lodash-4.17.15.tgz"}}}
+          JSON
           npm pack "$RUNNER_TEMP/fixture" --silent --pack-destination "$RUNNER_TEMP"
           artifact="$RUNNER_TEMP/mcp-evidence-fixture-1.0.0.tgz"
           test -f "$artifact"; echo "artifact=$artifact" >> "$GITHUB_OUTPUT"; sha256sum "$artifact" | tee "$RUNNER_TEMP/artifact.sha256"

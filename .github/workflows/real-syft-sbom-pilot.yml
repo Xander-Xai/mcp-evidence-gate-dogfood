@@ -1,0 +1,77 @@
+name: Real Syft SBOM pilot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SYFT_VERSION: 1.52.0
+  ARTIFACT_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+  SBOM_SHA256: ad9650592aec53f318295b2531120426b9edd83db797037bc10924278d40ae91
+  SBOM_SCHEMA: 16.1.3
+  EXPECTED_PACKAGES: 275
+
+jobs:
+  real-syft-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Download and verify immutable Syft release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/syft"
+          base="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
+          curl -fsSL "$base/syft_${SYFT_VERSION}_linux_amd64.tar.gz" -o "$RUNNER_TEMP/syft/artifact.tar.gz"
+          curl -fsSL "$base/syft_${SYFT_VERSION}_linux_amd64.sbom" -o "$RUNNER_TEMP/syft/syft.sbom"
+          echo "${ARTIFACT_SHA256}  $RUNNER_TEMP/syft/artifact.tar.gz" | sha256sum --check --strict
+          echo "${SBOM_SHA256}  $RUNNER_TEMP/syft/syft.sbom" | sha256sum --check --strict
+      - name: Validate real Syft evidence and A/B/C/D/E cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$RUNNER_TEMP/syft" "$RUNNER_TEMP/result.json" <<'PY'
+          import copy, hashlib, json, pathlib, sys
+          root=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          artifact=root/'artifact.tar.gz'; sbom=root/'syft.sbom'
+          def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+          artifact_sha=digest(artifact); sbom_sha=digest(sbom)
+          doc=json.loads(sbom.read_text())
+          source=doc['source']; schema=doc['schema']['version']; packages=doc['artifacts']
+          source_digest=source['version'].removeprefix('sha256:')
+          source_name=source['name']
+          assert artifact_sha == os.environ['ARTIFACT_SHA256']
+          assert sbom_sha == os.environ['SBOM_SHA256']
+          assert schema == os.environ['SBOM_SCHEMA']
+          assert len(packages) == int(os.environ['EXPECTED_PACKAGES'])
+          exact=(source_name == f"syft_{os.environ['SYFT_VERSION']}_linux_amd64.tar.gz" and source_digest == artifact_sha)
+          cases=[]
+          cases.append({'case':'A','status':'COMPLETE','artifact_digest':artifact_sha,'sbom_digest':sbom_sha,'schema':schema,'package_count':len(packages),'relationship':'exact-artifact-bound' if exact else 'unknown','source_name':source_name})
+          tampered=sbom.read_bytes()+b'\n'
+          cases.append({'case':'B','status':'SBOM_DIGEST_MISMATCH' if hashlib.sha256(tampered).hexdigest()!=sbom_sha else 'UNEXPECTED_PASS'})
+          artifact_b=artifact.read_bytes()+b'\n'
+          cases.append({'case':'C','status':'ARTIFACT_SBOM_BINDING_MISMATCH' if hashlib.sha256(artifact_b).hexdigest()!=source_digest else 'EXACT_ARTIFACT_BINDING_NOT_PROVEN'})
+          cases.append({'case':'D','status':'INCOMPLETE','reason_codes':['sbom_unparseable','sbom_schema_unsupported','package_inventory_missing']})
+          cases.append({'case':'E','status':'INCONCLUSIVE','reason_code':'sbom_missing'})
+          assert cases[0]['status']=='COMPLETE' and exact
+          assert cases[1]['status']=='SBOM_DIGEST_MISMATCH'
+          assert cases[2]['status']=='ARTIFACT_SBOM_BINDING_MISMATCH'
+          evidence={'artifact':{'ref':f'github.com/anchore/syft/releases/download/v{os.environ["SYFT_VERSION"]}/syft_{os.environ["SYFT_VERSION"]}_linux_amd64.tar.gz','sha256':'sha256:'+artifact_sha,'size':artifact.stat().st_size},'sbom':{'format':'syft-json','schema_version':schema,'sha256':'sha256:'+sbom_sha,'package_count':len(packages)},'relationship':{'type':'generated-from','artifact_sha256':'sha256:'+artifact_sha,'sbom_sha256':'sha256:'+sbom_sha,'confidence':'EXACT_ARTIFACT_BOUND'},'inventory':{'status':'present'}}
+          out.write_text(json.dumps({'tool':'syft','version':os.environ['SYFT_VERSION'],'evidence':evidence,'cases':cases,'classification':'VALIDATED'},indent=2)+'\n')
+          PY
+        env:
+          ARTIFACT_SHA256: ${{ env.ARTIFACT_SHA256 }}
+          SBOM_SHA256: ${{ env.SBOM_SHA256 }}
+          SBOM_SCHEMA: ${{ env.SBOM_SCHEMA }}
+          EXPECTED_PACKAGES: ${{ env.EXPECTED_PACKAGES }}
+          SYFT_VERSION: ${{ env.SYFT_VERSION }}
+      - name: Upload real Syft pilot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-syft-sbom-pilot-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/result.json

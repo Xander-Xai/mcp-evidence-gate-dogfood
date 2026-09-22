@@ -75,10 +75,10 @@ jobs:
             cp "$artifact" "$out/tampered$(basename "$artifact" | sed 's/^[^.]*//')"
             tampered=$(find "$out" -maxdepth 1 -type f -name 'tampered*' | head -1); printf x >> "$tampered"
             node "$RUNNER_TEMP/core/dist/cli.js" verify --receipt "$out/receipt.json" --artifact "$tampered" --evidence "$out/evidence.json" --policy strict-scanner-completeness --format json --now 2026-09-23T00:00:00Z > "$out/core-tampered.json" 2>&1
-            python - "$out" "$pcode" <<'PY'
+            python - "$out" "$pcode" "$repo" "$(basename "$artifact")" "$(sha256sum "$artifact" | cut -d' ' -f1)" <<'PY'
           import json, pathlib, sys
-          out=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); e=out/'evidence.json'; r=out/'receipt.json'; c=out/'core.json'; t=out/'core-tampered.json'
-          if not e.exists() or not r.exists(): json.dump({'classification':'HARNESS_FAILURE','producer_exit':code},open(out/'result.json','w')); raise SystemExit
+          out=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); repo=sys.argv[3]; artifact=sys.argv[4]; artifact_sha=sys.argv[5]; e=out/'evidence.json'; r=out/'receipt.json'; c=out/'core.json'; t=out/'core-tampered.json'
+          if not e.exists() or not r.exists(): json.dump({'repo':repo,'artifact':artifact,'artifact_sha256':artifact_sha,'classification':'HARNESS_FAILURE','producer_exit':code},open(out/'result.json','w')); raise SystemExit
           ev=json.load(open(e)) or {}; rec=json.load(open(r)) or {}; core=json.load(open(c)) or {}; tam=json.load(open(t)) or {}
           coverage=ev.get('scan_coverage',{}).get('status'); execution=ev.get('scanner_execution',{}).get('completeness_status'); verdict=rec.get('verdict')
           if coverage=='no_supported_targets' and execution=='complete': cls='COMPATIBLE_NO_SUPPORTED_TARGETS'
@@ -87,7 +87,7 @@ jobs:
           elif coverage=='targets_present' and execution=='incomplete': cls='COMPATIBLE_FAIL_CLOSED_INCOMPLETE'
           elif ev.get('scan_input',{}).get('kind')!='producer-owned-package-archive-view' and out.name.startswith('out-cytoscape-mcpb'): cls='ARTIFACT_TYPE_UNSUPPORTED'
           else: cls='HARNESS_FAILURE' if code not in (0,1) else 'UNCLASSIFIED'
-          json.dump({'classification':cls,'coverage':coverage,'execution':execution,'receipt':verdict,'core_decision':core.get('decision'),'tamper_decision':tam.get('decision'),'tamper_reason_codes':tam.get('reason_codes',[])},open(out/'result.json','w'),indent=2)
+          json.dump({'repo':repo,'artifact':artifact,'artifact_sha256':artifact_sha,'classification':cls,'coverage':coverage,'execution':execution,'receipt':verdict,'core_decision':core.get('decision'),'tamper_decision':tam.get('decision'),'tamper_reason_codes':tam.get('reason_codes',[])},open(out/'result.json','w'),indent=2)
           PY
             set -e
           done

@@ -79,7 +79,7 @@ jobs:
           import json, pathlib, sys
           out=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); e=out/'evidence.json'; r=out/'receipt.json'; c=out/'core.json'; t=out/'core-tampered.json'
           if not e.exists() or not r.exists(): json.dump({'classification':'HARNESS_FAILURE','producer_exit':code},open(out/'result.json','w')); raise SystemExit
-          ev=json.load(open(e)); rec=json.load(open(r)); core=json.load(open(c)); tam=json.load(open(t))
+          ev=json.load(open(e)) or {}; rec=json.load(open(r)) or {}; core=json.load(open(c)) or {}; tam=json.load(open(t)) or {}
           coverage=ev.get('scan_coverage',{}).get('status'); execution=ev.get('scanner_execution',{}).get('completeness_status'); verdict=rec.get('verdict')
           if coverage=='no_supported_targets' and execution=='complete': cls='COMPATIBLE_NO_SUPPORTED_TARGETS'
           elif coverage=='targets_present' and execution=='complete' and verdict=='findings': cls='COMPATIBLE_FINDINGS'
@@ -104,5 +104,5 @@ jobs:
           for f in "$RUNNER_TEMP"/replay/*/result.json "$RUNNER_TEMP"/replay/*/out-*/result.json; do
             [ -f "$f" ] || continue
             echo "### $f" >> "$GITHUB_STEP_SUMMARY"
-            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+            cat "$f" | tee -a "$GITHUB_STEP_SUMMARY"
           done

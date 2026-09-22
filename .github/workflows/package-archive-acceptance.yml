@@ -21,7 +21,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/fixture"
           cat > "$RUNNER_TEMP/fixture/package.json" <<'JSON'
-          {"name":"mcp-evidence-fixture","version":"1.0.0","private":true,"dependencies":{"lodash":"4.17.15"}}
+          {"name":"mcp-evidence-fixture","version":"1.0.0","private":true,"files":["npm-shrinkwrap.json","package-lock.json"],"dependencies":{"lodash":"4.17.15"}}
           JSON
           cat > "$RUNNER_TEMP/fixture/package-lock.json" <<'JSON'
           {"name":"mcp-evidence-fixture","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"mcp-evidence-fixture","version":"1.0.0"}}}

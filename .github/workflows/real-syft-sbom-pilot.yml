@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           python - "$RUNNER_TEMP/syft" "$RUNNER_TEMP/result.json" <<'PY'
-          import copy, hashlib, json, pathlib, sys
+          import copy, hashlib, json, os, pathlib, sys
           root=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
           artifact=root/'artifact.tar.gz'; sbom=root/'syft.sbom'
           def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest()

@@ -43,8 +43,8 @@ jobs:
           import { readFile, writeFile } from 'node:fs/promises';
           import { createHash } from 'node:crypto';
           import { join } from 'node:path';
-          import { verifySbomEvidence } from process.argv[2] + '/dist/core/sbom.js';
           const core=process.argv[2], root=process.argv[3], output=process.argv[4];
+          const { verifySbomEvidence } = await import(core + '/dist/core/sbom.js');
           const artifactPath=join(root,'artifact.tar.gz'), sbomPath=join(root,'syft.sbom');
           const artifact=await readFile(artifactPath), sbom=await readFile(sbomPath);
           const digest=b=>`sha256:${createHash('sha256').update(b).digest('hex')}`;

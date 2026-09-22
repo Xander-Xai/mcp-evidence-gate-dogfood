@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_SHA: d878f37640cd656382a166f3c5310d276a196b0b
+  PRODUCER_SHA: 6d533cd9a6a25a4b1cb06eefceff376551686a4b
   CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
   TRIVY_VERSION: 0.74.0
   TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
@@ -48,6 +48,9 @@ jobs:
           import gzip, hashlib, io, json, tarfile
           from pathlib import Path
           root=Path("$RUNNER_TEMP")
+          out=root/"no-target.tgz"
+          with out.open("wb") as raw, gzip.GzipFile(fileobj=raw,mode="wb",mtime=0) as gz, tarfile.open(fileobj=gz,mode="w:") as tar:
+              data=b'{"name":"proof-fixture","version":"1.0.0"}\n'; info=tarfile.TarInfo("package/package.json"); info.size=len(data); info.mode=0o644; info.mtime=0; tar.addfile(info,io.BytesIO(data))
           for name, lock in [("package-lock", "package-lock.json"), ("shrinkwrap", "npm-shrinkwrap.json")]:
               payload={"name":"proof-fixture","version":"1.0.0","lockfileVersion":3,"requires":True,"packages":{"":{"name":"proof-fixture","version":"1.0.0","dependencies":{"lodash":"4.17.21"}},"node_modules/lodash":{"version":"4.17.21","resolved":"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"}}}
               out=root/f"{name}.tgz"
@@ -60,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in package-lock shrinkwrap; do
+          for name in no-target package-lock shrinkwrap; do
             mkdir -p "$RUNNER_TEMP/out-$name"
             set +e
             (cd "$RUNNER_TEMP/producer" && python -m src.producer --trivy "$RUNNER_TEMP/trivy" --artifact "$RUNNER_TEMP/$name.tgz" --out "$RUNNER_TEMP/out-$name")
@@ -101,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          for name in package-lock shrinkwrap; do
+          for name in no-target package-lock shrinkwrap; do
             node "$RUNNER_TEMP/core/dist/cli.js" verify \
               --receipt "$RUNNER_TEMP/out-$name/receipt.json" \
               --artifact "$RUNNER_TEMP/$name.tgz" \
@@ -122,32 +125,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - "$RUNNER_TEMP/out-package-lock/evidence.json" "$RUNNER_TEMP/out-shrinkwrap/evidence.json" "$RUNNER_TEMP/proof-summary.json" "$RUNNER_TEMP/core-package-lock.json" "$RUNNER_TEMP/core-shrinkwrap.json" "$RUNNER_TEMP/core-tampered.json" <<'PY'
+          python - "$RUNNER_TEMP/out-no-target/evidence.json" "$RUNNER_TEMP/out-package-lock/evidence.json" "$RUNNER_TEMP/out-shrinkwrap/evidence.json" "$RUNNER_TEMP/proof-summary.json" "$RUNNER_TEMP/core-no-target.json" "$RUNNER_TEMP/core-package-lock.json" "$RUNNER_TEMP/core-shrinkwrap.json" "$RUNNER_TEMP/core-tampered.json" <<'PY'
           import json,sys
-          a=json.load(open(sys.argv[1])); c=json.load(open(sys.argv[2]))
+          n=json.load(open(sys.argv[1])); a=json.load(open(sys.argv[2])); c=json.load(open(sys.argv[3]))
+          assert n['scan_coverage']['status']=='no_supported_targets'
+          assert n['scanner_execution']['completeness_status']=='complete'
+          assert json.load(open(sys.argv[5]))['decision'] != 'pass'
           assert a['scan_coverage']['status']=='targets_present'
           assert a['scanner_execution']['completeness_status']=='complete'
           assert a['scanner_execution']['result_semantics_consistent'] is True
           assert a['scanner_execution']['completed_components']
           assert c['scan_coverage']['status']=='no_supported_targets'
           assert c['scanner_execution']['completeness_status']=='complete'
-          for path in sys.argv[4:]:
+          for path in sys.argv[5:]:
               json.load(open(path))
-          tampered=json.load(open(sys.argv[6]))
+          tampered=json.load(open(sys.argv[8]))
           assert 'digest_mismatch' in json.dumps(tampered)
-          assert not json.load(open(sys.argv[2].replace('evidence.json','trivy.raw.json'))).get('Results')
-          json.dump({'producer_sha':'d878f37640cd656382a166f3c5310d276a196b0b','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'no_supported_targets_no_results'},open(sys.argv[3],'w'),indent=2)
+          assert not json.load(open(sys.argv[3].replace('evidence.json','trivy.raw.json'))).get('Results')
+          json.dump({'producer_sha':'6d533cd9a6a25a4b1cb06eefceff376551686a4b','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','no_target':'complete_inconclusive','package_lock':'complete_results','npm_shrinkwrap':'no_supported_targets_no_results'},open(sys.argv[4],'w'),indent=2)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: package-archive-supported-target-proof
           path: |
             ${{ runner.temp }}/package-lock.tgz
+            ${{ runner.temp }}/no-target.tgz
             ${{ runner.temp }}/shrinkwrap.tgz
             ${{ runner.temp }}/out-package-lock/**
+            ${{ runner.temp }}/out-no-target/**
             ${{ runner.temp }}/out-shrinkwrap/**
             ${{ runner.temp }}/out-missing/**
             ${{ runner.temp }}/proof-summary.json
             ${{ runner.temp }}/core-package-lock.json
+            ${{ runner.temp }}/core-no-target.json
             ${{ runner.temp }}/core-shrinkwrap.json
             ${{ runner.temp }}/core-tampered.json

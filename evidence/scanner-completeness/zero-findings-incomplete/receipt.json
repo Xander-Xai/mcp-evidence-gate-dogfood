@@ -1,6 +1,6 @@
 {
   "attestation": "publisher-asserted",
-  "evidence_digest": "sha256:5d4ba5d3fb70d0c47cf2ecdc58eb55bd39b1fb4a92ce50840fad08e8c3a6169c",
+  "evidence_digest": "sha256:110e0b89b8cf4a6670f62354c11e9f198a8e3a03626add3b0eaace1c5c540726",
   "policy_profile": "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22",
   "scan_scope": [
     "dependency-vulnerabilities"

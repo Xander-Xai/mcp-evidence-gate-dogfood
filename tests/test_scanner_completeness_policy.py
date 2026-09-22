@@ -16,7 +16,32 @@ ROOT = Path(__file__).parents[1]
 ARTIFACT = ROOT / "dist" / "example-artifact.bin"
 
 
+def _corpus_clean_eligible(record: dict) -> bool:
+    """Apply the shared safety projection to either implementation shape."""
+    side = record
+    status = side.get("status", side.get("state"))
+    if status != "complete" or side.get("semantic_consistency", "ok") != "ok":
+        return False
+    if side.get("evidence_digest_matches", side.get("digest_matches", True)) is not True:
+        return False
+    if side.get("failed_components", side.get("failed", 0)):
+        return False
+    required = side.get("required_components")
+    completed = side.get("completed_components")
+    if required is not None and (not completed or any(item not in completed for item in required)):
+        return False
+    if isinstance(side.get("required"), int) and side.get("completed", 0) < side["required"]:
+        return False
+    counts = side.get("severity_counts", side.get("findings", {}))
+    return not any(key not in {"critical", "high", "medium", "low"} and value for key, value in counts.items())
+
+
 class ScannerCompletenessPolicyTests(unittest.TestCase):
+    def test_cross_implementation_corpus_has_same_safety_outcome(self) -> None:
+        corpus = json.loads((ROOT / "interop" / "corpus.json").read_text(encoding="utf-8"))
+        for name, case in corpus["cases"].items():
+            self.assertEqual(_corpus_clean_eligible(case["xander"]), case["clean_eligible"], name)
+            self.assertEqual(_corpus_clean_eligible(case["agentgate"]), case["clean_eligible"], name)
     def test_producer_schema_fixture_blocks_failed_zero_findings(self) -> None:
         fixture = ROOT / "evidence" / "scanner-completeness" / "zero-findings-incomplete"
         result = evaluate(fixture / "receipt.json", fixture / "evidence.json", ARTIFACT)

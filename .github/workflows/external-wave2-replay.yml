@@ -62,6 +62,9 @@ jobs:
           for artifact in "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/*.mcpb "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/bridge.tgz; do
             [ -f "$artifact" ] || continue; echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" >> "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/artifact.sha256"
           done
+          if [ ! -f "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/cytoscape-mcp.mcpb" ]; then
+            echo '{"repo":"cytoscape-desktop-mcp","artifact":"build/cytoscape-mcp.mcpb","classification":"HARNESS_FAILURE","reason":"mcpb_build_or_capture_failed","tamper":"not_applicable_no_artifact"}' > "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/mcpb-result.json"
+          fi
       - name: Run promoted Producer, Core, and tamper controls
         shell: bash
         run: |

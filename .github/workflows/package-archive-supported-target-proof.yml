@@ -134,7 +134,7 @@ jobs:
           for path in sys.argv[4:]:
               json.load(open(path))
           tampered=json.load(open(sys.argv[6]))
-          assert 'evidence_digest_mismatch' in str(tampered)
+          assert 'digest_mismatch' in json.dumps(tampered)
           assert not json.load(open(sys.argv[2].replace('evidence.json','trivy.raw.json'))).get('Results')
           json.dump({'producer_sha':'d878f37640cd656382a166f3c5310d276a196b0b','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'no_supported_targets_no_results'},open(sys.argv[3],'w'),indent=2)
           PY

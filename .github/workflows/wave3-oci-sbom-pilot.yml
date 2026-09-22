@@ -1,0 +1,49 @@
+name: Wave-3.1 OCI-SBOM pilot preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRODUCER_SHA: 6d533cd9a6a25a4b1cb06eefceff376551686a4b
+  CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
+  TRIVY_VERSION: 0.74.0
+  OCI_REF: ghcr.io/github/github-mcp-server@sha256:a44e77b9c9003ed0e228716d118aa4ce9f3418dce30fe2340c71553164bd96f0
+  SYFT_RELEASE: v1.52.0
+  SYFT_ASSET_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+  SYFT_SBOM_SHA256: ad9650592aec53f318295b2531120426b9edd83db797037bc10924278d40ae91
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify immutable pilot contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PRODUCER_SHA" = "6d533cd9a6a25a4b1cb06eefceff376551686a4b"
+          test "$CORE_SHA" = "da0b697da6b55d14db13fafec7538c83a314b035"
+          test "$TRIVY_VERSION" = "0.74.0"
+          echo "OCI_REF=$OCI_REF"
+          echo "SYFT_RELEASE=$SYFT_RELEASE"
+      - name: Require own forks before any replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in github-mcp-server syft; do
+            if ! git ls-remote --exit-code "https://github.com/Xander-Xai/$repo.git" HEAD >/dev/null 2>&1; then
+              echo "BLOCKED: Xander-Xai/$repo fork is absent; no replay is permitted."
+              exit 1
+            fi
+          done
+          echo "Own forks present; replay remains a separate authorized step."
+      - name: Record preparation boundary
+        if: always()
+        run: |
+          {
+            echo "## Wave-3.1 preparation boundary"
+            echo "- This workflow is preflight-only; it does not run Producer, Trivy, or Core replay."
+            echo "- No upstream repository is modified or contacted."
+          } >> "$GITHUB_STEP_SUMMARY"

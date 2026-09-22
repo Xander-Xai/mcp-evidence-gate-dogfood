@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_SHA: f657337263742cc0e83a5ebe81240f99698ce312
+  PRODUCER_SHA: d878f37640cd656382a166f3c5310d276a196b0b
   CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
   TRIVY_VERSION: 0.74.0
   TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
@@ -67,7 +67,7 @@ jobs:
             code=$?
             set -e
             echo "$name exit=$code"
-            test "$code" = 0
+            if [ "$name" = package-lock ]; then test "$code" = 0; else test "$code" = 1; fi
           done
       - name: B controlled missing-Results negative control
         shell: bash
@@ -108,9 +108,10 @@ jobs:
           assert a['scanner_execution']['completeness_status']=='complete'
           assert a['scanner_execution']['result_semantics_consistent'] is True
           assert a['scanner_execution']['completed_components']
-          assert c['scan_coverage']['status']=='targets_present'
+          assert c['scan_coverage']['status']=='no_supported_targets'
           assert c['scanner_execution']['completeness_status']=='complete'
-          json.dump({'producer_sha':'f657337263742cc0e83a5ebe81240f99698ce312','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'complete_results'},open(sys.argv[3],'w'),indent=2)
+          assert not json.load(open(sys.argv[2].replace('evidence.json','trivy.raw.json'))).get('Results')
+          json.dump({'producer_sha':'d878f37640cd656382a166f3c5310d276a196b0b','core_sha':'da0b697da6b55d14db13fafec7538c83a314b035','package_lock':'complete_results','npm_shrinkwrap':'no_supported_targets_no_results'},open(sys.argv[3],'w'),indent=2)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

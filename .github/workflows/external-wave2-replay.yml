@@ -1,0 +1,98 @@
+name: External Wave-2 promoted Producer replay
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [.github/workflows/external-wave2-replay.yml]
+
+permissions:
+  contents: read
+
+env:
+  PRODUCER_SHA: 6d533cd9a6a25a4b1cb06eefceff376551686a4b
+  CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
+  TRIVY_VERSION: 0.74.0
+  TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+  TRIVY_EXECUTABLE_SHA256: d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.11'}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: 24}
+      - name: Fetch immutable Producer, Core, and Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tar.gz" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_ARCHIVE_SHA256  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP"
+          echo "$TRIVY_EXECUTABLE_SHA256  $RUNNER_TEMP/trivy" | sha256sum --check --strict
+          git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_SHA"
+          corepack enable; corepack prepare pnpm@10.33.4 --activate
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Build exact artifacts from Xander-Xai forks
+        shell: bash
+        run: |
+          set -u
+          mkdir -p "$RUNNER_TEMP/replay"
+          for repo in dbhub mcp-server slack-mcp-server mineru-mcp; do
+            dir="$RUNNER_TEMP/src-$repo"; out="$RUNNER_TEMP/replay/$repo"; mkdir -p "$out"
+            git clone --depth 1 "https://github.com/Xander-Xai/$repo.git" "$dir" >"$out/clone.log" 2>&1
+            if [ $? -ne 0 ]; then echo '{"classification":"HARNESS_FAILURE","reason":"clone_failed"}' > "$out/result.json"; continue; fi
+            (cd "$dir" && if [ -f pnpm-lock.yaml ]; then corepack enable; corepack prepare pnpm@10.33.4 --activate; pnpm install --frozen-lockfile; else npm install; fi && npm pack --silent --pack-destination "$out") >"$out/build.log" 2>&1
+            if [ $? -ne 0 ]; then echo '{"classification":"HARNESS_FAILURE","reason":"release_pack_failed"}' > "$out/result.json"; continue; fi
+            artifact=$(find "$out" -maxdepth 1 -type f -name '*.tgz' | head -1)
+            if [ -z "$artifact" ]; then echo '{"classification":"HARNESS_FAILURE","reason":"no_tgz"}' > "$out/result.json"; continue; fi
+            echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" > "$out/artifact.sha256"
+          done
+          dir="$RUNNER_TEMP/src-cytoscape-desktop-mcp"; out="$RUNNER_TEMP/replay/cytoscape-desktop-mcp"; mkdir -p "$out"
+          git clone --depth 1 https://github.com/Xander-Xai/cytoscape-desktop-mcp.git "$dir" >"$out/clone.log" 2>&1
+          if [ $? -eq 0 ]; then
+            (cd "$dir" && make build_claude_mcpb && cp build/cytoscape-mcp.mcpb "$out/cytoscape-mcp.mcpb" && VER=$(jq -r '.version' claude-extension/manifest.json) && make stage-npm-bridge TAG="mcpb-v$VER" && (cd build/npm-staging && npm pack --silent) && cp build/npm-staging/*.tgz "$out/bridge.tgz") >"$out/build.log" 2>&1
+          fi
+          for artifact in "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/*.mcpb "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/bridge.tgz; do
+            [ -f "$artifact" ] || continue; echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" >> "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/artifact.sha256"
+          done
+      - name: Run promoted Producer, Core, and tamper controls
+        shell: bash
+        run: |
+          set -u
+          for artifact in $(find "$RUNNER_TEMP/replay" -maxdepth 2 -type f \( -name '*.tgz' -o -name '*.mcpb' \)); do
+            repo=$(basename "$(dirname "$artifact")"); name=$(basename "$artifact" | tr '. ' '__'); out="$RUNNER_TEMP/replay/$repo/out-$name"; mkdir -p "$out"
+            set +e
+            (cd "$RUNNER_TEMP/producer" && python -m src.producer --trivy "$RUNNER_TEMP/trivy" --artifact "$artifact" --out "$out") >"$out/producer.log" 2>&1
+            pcode=$?
+            node "$RUNNER_TEMP/core/dist/cli.js" verify --receipt "$out/receipt.json" --artifact "$artifact" --evidence "$out/evidence.json" --policy strict-scanner-completeness --format json --now 2026-09-23T00:00:00Z > "$out/core.json" 2>&1
+            cp "$artifact" "$out/tampered$(basename "$artifact" | sed 's/^[^.]*//')"
+            tampered=$(find "$out" -maxdepth 1 -type f -name 'tampered*' | head -1); printf x >> "$tampered"
+            node "$RUNNER_TEMP/core/dist/cli.js" verify --receipt "$out/receipt.json" --artifact "$tampered" --evidence "$out/evidence.json" --policy strict-scanner-completeness --format json --now 2026-09-23T00:00:00Z > "$out/core-tampered.json" 2>&1
+            python - "$out" "$pcode" <<'PY'
+          import json, pathlib, sys
+          out=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); e=out/'evidence.json'; r=out/'receipt.json'; c=out/'core.json'; t=out/'core-tampered.json'
+          if not e.exists() or not r.exists(): json.dump({'classification':'HARNESS_FAILURE','producer_exit':code},open(out/'result.json','w')); raise SystemExit
+          ev=json.load(open(e)); rec=json.load(open(r)); core=json.load(open(c)); tam=json.load(open(t))
+          coverage=ev.get('scan_coverage',{}).get('status'); execution=ev.get('scanner_execution',{}).get('completeness_status'); verdict=rec.get('verdict')
+          if coverage=='no_supported_targets' and execution=='complete': cls='COMPATIBLE_NO_SUPPORTED_TARGETS'
+          elif coverage=='targets_present' and execution=='complete' and verdict=='findings': cls='COMPATIBLE_FINDINGS'
+          elif coverage=='targets_present' and execution=='complete' and verdict=='clean': cls='COMPATIBLE_CLEAN'
+          elif coverage=='targets_present' and execution=='incomplete': cls='COMPATIBLE_FAIL_CLOSED_INCOMPLETE'
+          elif ev.get('scan_input',{}).get('kind')!='producer-owned-package-archive-view' and out.name.startswith('out-cytoscape-mcpb'): cls='ARTIFACT_TYPE_UNSUPPORTED'
+          else: cls='HARNESS_FAILURE' if code not in (0,1) else 'UNCLASSIFIED'
+          json.dump({'classification':cls,'coverage':coverage,'execution':execution,'receipt':verdict,'core_decision':core.get('decision'),'tamper_decision':tam.get('decision'),'tamper_reason_codes':tam.get('reason_codes',[])},open(out/'result.json','w'),indent=2)
+          PY
+            set -e
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: external-wave2-replay-${{ github.run_id }}
+          path: ${{ runner.temp }}/replay
+          retention-days: 90

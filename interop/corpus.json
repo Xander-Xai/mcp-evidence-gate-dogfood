@@ -1,0 +1,16 @@
+{
+  "schema_version": "xander-agentgate-safety-corpus-v1",
+  "agentgate_commit": "fc97e7546e2ad3f52bfefa5153d01088635c8098",
+  "cases": {
+    "complete-clean": {"xander": {"status": "complete", "semantic_consistency": "ok", "severity_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0}}, "agentgate": {"state": "complete", "semantic_consistency": "ok", "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0}}, "clean_eligible": true},
+    "incomplete": {"xander": {"status": "incomplete"}, "agentgate": {"state": "incomplete"}, "clean_eligible": false},
+    "failed": {"xander": {"status": "failed"}, "agentgate": {"state": "failed"}, "clean_eligible": false},
+    "missing-execution": {"xander": {}, "agentgate": {}, "clean_eligible": false},
+    "unknown-status": {"xander": {"status": "future-state-v1"}, "agentgate": {"state": "future-state-v1"}, "clean_eligible": false},
+    "unknown-semantic-consistency": {"xander": {"status": "complete", "semantic_consistency": "future-consistency-v1"}, "agentgate": {"state": "complete", "semantic_consistency": "future-consistency-v1"}, "clean_eligible": false},
+    "unknown-severity": {"xander": {"status": "complete", "semantic_consistency": "ok", "severity_counts": {"future-severity-v1": 1}}, "agentgate": {"state": "complete", "semantic_consistency": "ok", "findings": {"future-severity-v1": 1}}, "clean_eligible": false},
+    "missing-required-component": {"xander": {"status": "complete", "required_components": ["scanner_process"], "completed_components": []}, "agentgate": {"state": "complete", "required": 1, "completed": 0}, "clean_eligible": false},
+    "contradictory-completion": {"xander": {"status": "complete", "failed_components": ["scanner_process"]}, "agentgate": {"state": "complete", "failed": 1}, "clean_eligible": false},
+    "tampered-evidence": {"xander": {"status": "complete", "evidence_digest_matches": false}, "agentgate": {"state": "complete", "digest_matches": false}, "clean_eligible": false}
+  }
+}

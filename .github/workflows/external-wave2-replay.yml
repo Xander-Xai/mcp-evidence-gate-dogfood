@@ -96,3 +96,13 @@ jobs:
           name: external-wave2-replay-${{ github.run_id }}
           path: ${{ runner.temp }}/replay
           retention-days: 90
+      - name: Summarize external classifications
+        if: always()
+        shell: bash
+        run: |
+          echo '## External Wave-2 classification' >> "$GITHUB_STEP_SUMMARY"
+          for f in "$RUNNER_TEMP"/replay/*/result.json "$RUNNER_TEMP"/replay/*/out-*/result.json; do
+            [ -f "$f" ] || continue
+            echo "### $f" >> "$GITHUB_STEP_SUMMARY"
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          done

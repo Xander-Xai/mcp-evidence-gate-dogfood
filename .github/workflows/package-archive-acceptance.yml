@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PRODUCER_SHA: 2aeeb6c
-      CORE_RUNTIME_SHA: 06567c840c1d68a4b45ff2d12d6e6c32898fff11
+      CORE_RUNTIME_SHA: 54bc7511bc42e553e47f2903668bc22a886d1c30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -51,7 +51,7 @@ jobs:
       - name: Verify exact archive with Core
         id: gate
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@06567c840c1d68a4b45ff2d12d6e6c32898fff11
+        uses: Xander-Xai/mcp-evidence-gate@54bc7511bc42e553e47f2903668bc22a886d1c30
         with:
           receipt: ${{ runner.temp }}/out/receipt.json
           artifact: ${{ steps.pack.outputs.artifact }}
@@ -66,7 +66,7 @@ jobs:
       - name: Verify tampered archive is blocked
         id: tampered_gate
         continue-on-error: true
-        uses: Xander-Xai/mcp-evidence-gate@06567c840c1d68a4b45ff2d12d6e6c32898fff11
+        uses: Xander-Xai/mcp-evidence-gate@54bc7511bc42e553e47f2903668bc22a886d1c30
         with:
           receipt: ${{ runner.temp }}/out/receipt.json
           artifact: ${{ runner.temp }}/tampered.tgz

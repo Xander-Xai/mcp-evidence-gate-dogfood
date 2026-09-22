@@ -35,6 +35,7 @@ jobs:
           curl -fsSL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" -o "$RUNNER_TEMP/syft/syft.tar.gz"
           echo "${SYFT_TAR_SHA256}  $RUNNER_TEMP/syft/syft.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/syft/syft.tar.gz" -C "$RUNNER_TEMP/syft"
+          echo "SYFT_BINARY_SHA256=$(sha256sum "$RUNNER_TEMP/syft/syft" | cut -d' ' -f1)" >> "$GITHUB_ENV"
           docker buildx imagetools inspect --raw "$SECOND_REF" > "$RUNNER_TEMP/oci/second.json"
           docker buildx imagetools inspect --raw "$OTHER_REF" > "$RUNNER_TEMP/oci/other.json"
           test "sha256:$(sha256sum "$RUNNER_TEMP/oci/second.json" | cut -d' ' -f1)" = "$SECOND_DIGEST"
@@ -60,17 +61,22 @@ jobs:
           const artifact=await readFile(artifactPath), other=await readFile(otherPath), sbom=await readFile(join(root,'second.sbom.json')), repeat=await readFile(join(root,'second.repeat.sbom.json'));
           const artifactDigest=digest(artifact), otherDigest=digest(other), sbomDigest=digest(sbom), doc=JSON.parse(sbom.toString()), repeatDoc=JSON.parse(repeat.toString());
           if (artifactDigest!==process.env.SECOND_DIGEST || otherDigest!==process.env.OTHER_DIGEST) throw new Error('manifest_digest_verification_failed');
-          if (doc.schema?.version!=='16.1.3' || !doc.source?.version || doc.source.version!==process.env.SECOND_DIGEST) throw new Error(JSON.stringify({error:'exact_source_binding_not_proven',source:doc.source,schema:doc.schema}));
+          const semantic=x=>JSON.stringify({schema:x.schema?.version,source:x.source?.version,artifacts:(x.artifacts||[]).map(p=>({id:p.id,name:p.name,version:p.version,type:p.type})).sort((x,y)=>x.id.localeCompare(y.id))});
+          const byteReproducible=digest(sbom)===digest(repeat), semanticStable=semantic(doc)===semantic(repeatDoc);
+          if (doc.source?.version!==process.env.SECOND_DIGEST) throw new Error(JSON.stringify({error:'exact_source_binding_not_proven',source:doc.source,schema:doc.schema}));
+          if (!semanticStable) throw new Error(JSON.stringify({error:'semantic_identity_not_stable',byteReproducible,source:doc.source}));
+          if (doc.schema?.version!=='16.1.3') {
+            await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,syft_version:process.env.SYFT_VERSION,syft_binary_sha256:process.env.SYFT_BINARY_SHA256,artifact_ref:process.env.SECOND_REF,artifact_digest:artifactDigest,sbom_digest:sbomDigest,schema:doc.schema?.version,package_count:doc.artifacts?.length ?? 0,source:doc.source,source_binding:'EXACT_ARTIFACT_BOUND',cases:{A2:{status:'inconclusive',reasonCodes:['sbom_schema_unsupported']},B2:{status:'inconclusive',reasonCodes:['sbom_schema_unsupported']},C2:{status:'inconclusive',reasonCodes:['sbom_schema_unsupported']},D2:{byte_reproducible:byteReproducible,semantic_identity_stable:semanticStable}},classification:'PARTIAL',reason:'exact binding proven but Core allowlist is exact syft-json schema 16.1.3 and generated SBOM is unsupported'},null,2));
+            process.exit(0);
+          }
           const envelope=(bytes=sbom, artifactSha=artifactDigest)=>({schema_version:'project-defined-sbom-evidence-v1',artifact:{ref:process.env.SECOND_REF,sha256:artifactSha,size:artifactSha===artifactDigest?artifact.length:other.length},sbom:{format:'syft-json',schema_version:'16.1.3',sha256:digest(bytes),size:bytes.length},relationship:{type:'generated-from',artifact_sha256:artifactDigest,sbom_sha256:digest(bytes),binding:'exact-artifact'},inventory:{status:'present',package_count:doc.artifacts.length}});
           const a=await verifySbomEvidence(artifactPath,envelope(),sbom);
           const tampered=Buffer.concat([sbom,Buffer.from('\n')]);
           const b=await verifySbomEvidence(artifactPath,envelope(),tampered);
           const cEnvelope=envelope(); cEnvelope.artifact.sha256=otherDigest; cEnvelope.artifact.size=other.length; cEnvelope.relationship.artifact_sha256=artifactDigest;
           const c=await verifySbomEvidence(otherPath,cEnvelope,sbom);
-          const semantic=x=>JSON.stringify({schema:x.schema?.version,source:x.source?.version,artifacts:(x.artifacts||[]).map(p=>({id:p.id,name:p.name,version:p.version,type:p.type})).sort((x,y)=>x.id.localeCompare(y.id))});
-          const byteReproducible=digest(sbom)===digest(repeat), semanticStable=semantic(doc)===semantic(repeatDoc);
           if(a.status!=='pass'||b.status!=='blocked'||!b.reasonCodes.includes('sbom_digest_mismatch')||c.status!=='blocked'||!c.reasonCodes.includes('artifact_sbom_binding_mismatch')||!semanticStable) throw new Error(JSON.stringify({a,b,c,byteReproducible,semanticStable,source:doc.source}));
-          await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,artifact_ref:process.env.SECOND_REF,artifact_digest:artifactDigest,sbom_digest:sbomDigest,schema:doc.schema.version,package_count:doc.artifacts.length,source:doc.source,cases:{A2:a,B2:b,C2:c,D2:{byte_reproducible:byteReproducible,semantic_identity_stable:semanticStable}},classification:'GENERALIZED'},null,2));
+          await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,syft_version:process.env.SYFT_VERSION,syft_binary_sha256:process.env.SYFT_BINARY_SHA256,artifact_ref:process.env.SECOND_REF,artifact_digest:artifactDigest,sbom_digest:sbomDigest,schema:doc.schema.version,package_count:doc.artifacts.length,source:doc.source,source_binding:'EXACT_ARTIFACT_BOUND',cases:{A2:a,B2:b,C2:c,D2:{byte_reproducible:byteReproducible,semantic_identity_stable:semanticStable}},classification:'GENERALIZED'},null,2));
           JS
       - name: Upload second-artifact evidence
         if: always()

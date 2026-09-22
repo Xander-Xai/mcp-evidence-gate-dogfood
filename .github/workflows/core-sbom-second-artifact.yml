@@ -85,4 +85,9 @@ jobs:
           name: core-sbom-second-artifact-${{ github.sha }}
           retention-days: 90
           if-no-files-found: error
-          path: ${{ runner.temp }}/result.json
+          path: |
+            ${{ runner.temp }}/result.json
+            ${{ runner.temp }}/oci/second.sbom.json
+            ${{ runner.temp }}/oci/second.repeat.sbom.json
+            ${{ runner.temp }}/oci/second.json
+            ${{ runner.temp }}/oci/other.json

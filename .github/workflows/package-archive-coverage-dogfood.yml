@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_SHA: f657337
+  PRODUCER_SHA: 0c18587
   CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
   TRIVY_VERSION: 0.74.0
   TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
@@ -53,8 +53,6 @@ jobs:
           python - "$RUNNER_TEMP/out-a/evidence.json" "$RUNNER_TEMP/out-b/evidence.json" <<'PY'
           import json, sys
           a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2]))
-          print('A', a.get('scan_coverage'), a.get('scanner_execution',{}).get('completeness_status'), a.get('scanner_execution',{}).get('completeness_reason'))
-          print('B', b.get('scan_coverage'), b.get('scanner_execution',{}).get('completeness_status'), b.get('scanner_execution',{}).get('completeness_reason'))
           assert a['scan_coverage']['status']=='no_supported_targets'
           assert a['scanner_execution']['completeness_status']=='complete'
           assert b['scan_coverage']['status']=='targets_present'

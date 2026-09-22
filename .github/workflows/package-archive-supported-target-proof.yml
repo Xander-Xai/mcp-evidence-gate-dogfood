@@ -37,6 +37,7 @@ jobs:
           git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
           git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_SHA"
           corepack enable
+          corepack prepare pnpm@10.33.4 --activate
           pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
           pnpm --dir "$RUNNER_TEMP/core" build
       - name: Build deterministic package-lock and shrinkwrap archives

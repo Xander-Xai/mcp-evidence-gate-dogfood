@@ -1,0 +1,76 @@
+name: Core SBOM Syft dogfood
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CORE_SHA: f328e5e07a635b9e53477e2b06c919b254fa2bc8
+  ARTIFACT_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+  SBOM_SHA256: ad9650592aec53f318295b2531120426b9edd83db797037bc10924278d40ae91
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: 24}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.11'}
+      - name: Fetch immutable Syft pair and Core HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/syft"
+          base='https://github.com/anchore/syft/releases/download/v1.52.0'
+          curl -fsSL "$base/syft_1.52.0_linux_amd64.tar.gz" -o "$RUNNER_TEMP/syft/artifact.tar.gz"
+          curl -fsSL "$base/syft_1.52.0_linux_amd64.sbom" -o "$RUNNER_TEMP/syft/syft.sbom"
+          echo "${ARTIFACT_SHA256}  $RUNNER_TEMP/syft/artifact.tar.gz" | sha256sum --check --strict
+          echo "${SBOM_SHA256}  $RUNNER_TEMP/syft/syft.sbom" | sha256sum --check --strict
+          git clone https://github.com/Xander-Xai/mcp-evidence-gate.git "$RUNNER_TEMP/core"
+          git -C "$RUNNER_TEMP/core" checkout --detach "$CORE_SHA"
+          corepack enable
+          pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Execute SBOM A/B/C/D/E and legacy F cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - "$RUNNER_TEMP/core" "$RUNNER_TEMP/syft" "$RUNNER_TEMP/result.json" <<'JS'
+          import { readFile, writeFile } from 'node:fs/promises';
+          import { createHash } from 'node:crypto';
+          import { join } from 'node:path';
+          import { verifySbomEvidence } from process.argv[2] + '/dist/core/sbom.js';
+          const core=process.argv[2], root=process.argv[3], output=process.argv[4];
+          const artifactPath=join(root,'artifact.tar.gz'), sbomPath=join(root,'syft.sbom');
+          const artifact=await readFile(artifactPath), sbom=await readFile(sbomPath);
+          const digest=b=>`sha256:${createHash('sha256').update(b).digest('hex')}`;
+          const artifactDigest=digest(artifact), sbomDigest=digest(sbom);
+          if (artifactDigest !== `sha256:${process.env.ARTIFACT_SHA256}` || sbomDigest !== `sha256:${process.env.SBOM_SHA256}`) throw new Error('frozen_digest_mismatch');
+          const source=JSON.parse(sbom.toString()).source;
+          const envelope=(sbomBytes=sbom, relationshipArtifact=artifactDigest)=>({schema_version:'project-defined-sbom-evidence-v1',artifact:{ref:'syft_1.52.0_linux_amd64.tar.gz',sha256:artifactDigest,size:artifact.length},sbom:{format:'syft-json',schema_version:'16.1.3',sha256:digest(sbomBytes),size:sbomBytes.length},relationship:{type:'generated-from',artifact_sha256:relationshipArtifact,sbom_sha256:digest(sbomBytes),binding:'exact-artifact'},inventory:{status:'present',package_count:JSON.parse(sbom.toString()).artifacts.length}});
+          const a=await verifySbomEvidence(artifactPath,envelope(),sbom);
+          const tampered=Buffer.concat([sbom,Buffer.from('\n')]);
+          const b=await verifySbomEvidence(artifactPath,envelope(tampered),tampered);
+          const c=await verifySbomEvidence(artifactPath,envelope(sbom,'sha256:'+'0'.repeat(64)),sbom);
+          const malformed=Buffer.from('{');
+          const d=await verifySbomEvidence(artifactPath,envelope(malformed),malformed);
+          const e={status:'inconclusive',reasonCodes:['sbom_missing']};
+          const receipt={scanner:'trivy',scanned_artifact_digest:artifactDigest,scan_scope:['dependency-vulnerabilities'],verdict:'clean',scanned_at:'2026-09-23T00:00:00Z',attestation:'publisher-asserted'};
+          await writeFile(join(root,'receipt.json'),JSON.stringify(receipt));
+          const fproc=await (import('node:child_process')).then(({execFile})=>new Promise(resolve=>execFile('node',[join(core,'dist/cli.js'),'verify','--receipt',join(root,'receipt.json'),'--artifact',artifactPath,'--policy','permissive','--format','json','--now','2026-09-23T00:00:00Z'],{encoding:'utf8'},(error,stdout,stderr)=>resolve({code:error?.code??0,stdout,stderr}))));
+          const f=JSON.parse(fproc.stdout);
+          if(a.status!=='pass'||b.status!=='blocked'||!b.reasonCodes.includes('sbom_digest_mismatch')||c.status!=='blocked'||!c.reasonCodes.includes('artifact_sbom_binding_mismatch')||d.status!=='inconclusive'||e.status!=='inconclusive'||f.sbom_admission_status!=='not-provided'||f.decision!=='pass') throw new Error(JSON.stringify({a,b,c,d,e,f}));
+          await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,artifact_sha256:artifactDigest,sbom_sha256:sbomDigest,source,security_verdict:'NOT_EVALUATED_BY_SBOM_CONTRACT',cases:{A:a,B:b,C:c,D:d,E:e,F:{status:'pass',sbom_admission_status:f.sbom_admission_status,decision:f.decision}},classification:'DOGFOOD_PASS'},null,2));
+          JS
+      - name: Upload dogfood evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-sbom-syft-dogfood-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/result.json

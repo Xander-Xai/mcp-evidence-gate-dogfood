@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  CORE_SHA: 11bee6b8143f908e91df365bbea3e648b3ea0971
+  CORE_SHA: 1876390160443fb574a6cf106c7bcde378031b4e
   ARTIFACT_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
   SBOM_SHA256: ad9650592aec53f318295b2531120426b9edd83db797037bc10924278d40ae91
 
@@ -46,7 +46,7 @@ jobs:
           import { createHash } from 'node:crypto';
           import { join } from 'node:path';
           const core=process.argv[2], root=process.argv[3], output=process.argv[4];
-          const { verifySbomEvidence } = await import(core + '/dist/core/sbom.js');
+          const { loadSbomEvidence, verifySbomEvidence } = await import(core + '/dist/core/sbom.js');
           const artifactPath=join(root,'artifact.tar.gz'), sbomPath=join(root,'syft.sbom');
           const artifact=await readFile(artifactPath), sbom=await readFile(sbomPath);
           const digest=b=>`sha256:${createHash('sha256').update(b).digest('hex')}`;
@@ -62,12 +62,27 @@ jobs:
           const malformed=Buffer.from('{');
           const d=await verifySbomEvidence(artifactPath,envelope(malformed),malformed);
           const e={status:'inconclusive',reasonCodes:['sbom_missing']};
+          const malformedEnvelopePath=join(root,'malformed-envelope.json');
+          const malformedSbomPath=join(root,'malformed-envelope-sbom.json');
+          await writeFile(malformedEnvelopePath,'{');
+          await writeFile(malformedSbomPath,sbom);
+          const g=await loadSbomEvidence(malformedEnvelopePath,malformedSbomPath);
+          const sameReleaseEnvelope=envelope(); sameReleaseEnvelope.relationship.binding='same-release';
+          const h=await verifySbomEvidence(artifactPath,sameReleaseEnvelope,sbom);
+          const oversizedPath=join(root,'oversized.sbom');
+          await writeFile(oversizedPath,Buffer.alloc(0));
+          await (await import('node:fs/promises')).truncate(oversizedPath,64*1024*1024+1);
+          const j=await loadSbomEvidence(malformedSbomPath,oversizedPath);
           const receipt={scanner:'trivy',scanned_artifact_digest:artifactDigest,scan_scope:['dependency-vulnerabilities'],verdict:'clean',scanned_at:'2026-09-23T00:00:00Z',attestation:'publisher-asserted'};
           await writeFile(join(root,'receipt.json'),JSON.stringify(receipt));
           const fproc=await (import('node:child_process')).then(({execFile})=>new Promise(resolve=>execFile('node',[join(core,'dist/cli.js'),'verify','--receipt',join(root,'receipt.json'),'--artifact',artifactPath,'--policy','permissive','--format','json','--now','2026-09-23T00:00:00Z'],{encoding:'utf8'},(error,stdout,stderr)=>resolve({code:error?.code??0,stdout,stderr}))));
           const f=JSON.parse(fproc.stdout);
-          if(a.status!=='pass'||b.status!=='blocked'||!b.reasonCodes.includes('sbom_digest_mismatch')||c.status!=='blocked'||!c.reasonCodes.includes('artifact_sbom_binding_mismatch')||d.status!=='inconclusive'||e.status!=='inconclusive'||f.sbom_admission_status!=='not-provided'||f.decision!=='pass') throw new Error(JSON.stringify({a,b,c,d,e,f}));
-          await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,artifact_sha256:artifactDigest,sbom_sha256:sbomDigest,source,security_verdict:'NOT_EVALUATED_BY_SBOM_CONTRACT',cases:{A:a,B:b,C:c,D:d,E:e,F:{status:'pass',sbom_admission_status:f.sbom_admission_status,decision:f.decision}},classification:'DOGFOOD_PASS'},null,2));
+          const failReceipt={...receipt,verdict:'findings'};
+          await writeFile(join(root,'fail-receipt.json'),JSON.stringify(failReceipt));
+          const failProc=await (import('node:child_process')).then(({execFile})=>new Promise(resolve=>execFile('node',[join(core,'dist/cli.js'),'verify','--receipt',join(root,'fail-receipt.json'),'--artifact',artifactPath,'--sbom-evidence',malformedEnvelopePath,'--sbom',malformedSbomPath,'--policy','permissive','--format','json','--now','2026-09-23T00:00:00Z'],{encoding:'utf8'},(error,stdout,stderr)=>resolve({code:error?.code??0,stdout,stderr}))));
+          const i=JSON.parse(failProc.stdout);
+          if(a.status!=='pass'||b.status!=='blocked'||!b.reasonCodes.includes('sbom_digest_mismatch')||c.status!=='blocked'||!c.reasonCodes.includes('artifact_sbom_binding_mismatch')||d.status!=='inconclusive'||e.status!=='inconclusive'||g.status!=='result'||!g.result.reasonCodes.includes('sbom_malformed')||h.status!=='inconclusive'||!h.reasonCodes.includes('artifact_sbom_binding_missing')||j.status!=='result'||!j.result.reasonCodes.includes('sbom_size_limit_exceeded')||f.sbom_admission_status!=='not-provided'||f.decision!=='pass'||i.decision!=='fail'||i.sbom_admission_status!=='inconclusive') throw new Error(JSON.stringify({a,b,c,d,e,f,g,h,i,j}));
+          await writeFile(output,JSON.stringify({core_sha:process.env.CORE_SHA,artifact_sha256:artifactDigest,sbom_sha256:sbomDigest,source,security_verdict:'NOT_EVALUATED_BY_SBOM_CONTRACT',cases:{A:a,B:b,C:c,D:d,E:e,F:{status:'pass',sbom_admission_status:f.sbom_admission_status,decision:f.decision},G:g,H:h,I:{decision:i.decision,sbom_admission_status:i.sbom_admission_status},J:j},classification:'DOGFOOD_PASS'},null,2));
           JS
       - name: Upload dogfood evidence
         if: always()

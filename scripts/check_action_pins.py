@@ -9,6 +9,7 @@ from pathlib import Path
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 EXTERNAL = re.compile(r"^[^/@\s]+/[^@\s]+@(.+)$")
+IMMUTABLE_IDENTITY_KEYS = {"PRODUCER_SHA", "CORE_SHA", "CORE_PR_HEAD"}
 
 
 def _value(raw: str) -> str:
@@ -105,6 +106,13 @@ def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
     errors = []
     if not re.search(r"(?m)^jobs:\s*$", text):
         return [f"{source}: jobs mapping is required"]
+    # Dependency checkout identities are immutable Git commits too.  Restrict
+    # this check to the explicit workflow keys so artifact digests and other
+    # hexadecimal data are not mistaken for Git SHAs.
+    for number, raw in enumerate(text.splitlines(), 1):
+        match = re.match(r"^\s+([A-Z][A-Z0-9_]*):\s*([^\s#]+)\s*(?:#.*)?$", raw)
+        if match and match.group(1) in IMMUTABLE_IDENTITY_KEYS and not SHA.fullmatch(match.group(2)):
+            errors.append(f"{source}:line {number}: {match.group(1)} must use a full 40-character commit SHA")
     for location, ref in semantic_action_refs(text, source):
         error = validate_ref(ref, location)
         if error:

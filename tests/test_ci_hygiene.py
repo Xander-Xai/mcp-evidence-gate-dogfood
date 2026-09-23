@@ -42,6 +42,34 @@ jobs:
         errors = validate_workflow_text(text)
         self.assertEqual(len(errors), 2)
 
+    def test_full_dependency_identity_sha_is_accepted(self):
+        text = f"""
+jobs:
+  test:
+    env:
+      PRODUCER_SHA: {SHA}
+      CORE_SHA: {SHA}
+      CORE_PR_HEAD: {SHA}
+    steps:
+      - run: git checkout --detach "$PRODUCER_SHA"
+"""
+        self.assertEqual(validate_workflow_text(text), [])
+
+    def test_abbreviated_dependency_identity_sha_is_rejected(self):
+        text = """
+jobs:
+  test:
+    env:
+      PRODUCER_SHA: 2aeeb6c
+      CORE_SHA: 1234567890ab
+      CORE_PR_HEAD: abcdefg
+    steps:
+      - run: git checkout --detach "$PRODUCER_SHA"
+"""
+        errors = validate_workflow_text(text)
+        self.assertEqual(len(errors), 3)
+        self.assertTrue(all("full 40-character commit SHA" in error for error in errors))
+
     def test_multifield_step_refs_are_validated(self):
         text = f"""
 jobs:

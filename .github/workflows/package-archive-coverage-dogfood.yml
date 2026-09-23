@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  PRODUCER_SHA: 0c18587
+  PRODUCER_SHA: 0c18587b25669bd2f8a29331acf2392aaa3a7633
   CORE_SHA: da0b697da6b55d14db13fafec7538c83a314b035
   TRIVY_VERSION: 0.74.0
   TRIVY_ARCHIVE_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
@@ -31,6 +31,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP"
           echo "$TRIVY_EXECUTABLE_SHA256  $RUNNER_TEMP/trivy" | sha256sum --check --strict
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" fetch --no-tags origin "$PRODUCER_SHA"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           test "$(git -C "$RUNNER_TEMP/producer" rev-parse HEAD)" = "$(git -C "$RUNNER_TEMP/producer" rev-parse "$PRODUCER_SHA")"
       - name: Run classes A no-targets, B supported-target-no-results, C tamper

@@ -332,6 +332,103 @@ jobs:
                 text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in command.splitlines())
                 self.assertEqual(validate_workflow_text(text), [], command)
 
+    def test_git_subcommands_are_shell_word_normalized(self):
+        invalid = (
+            'git "checkout" main', "git 'checkout' main", '/usr/bin/git "checkout" main',
+            '"/usr/bin/git" \'checkout\' main', 'git -C repo "checkout" main',
+            'git "fetch" origin main', 'SUBCOMMAND=checkout\ngit "$SUBCOMMAND" main',
+            'git "$(echo checkout)" main',
+        )
+        for command in invalid:
+            with self.subTest(command=command):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in command.splitlines())
+                self.assertTrue(validate_workflow_text(text), command)
+
+        valid = (
+            f'git "checkout" {SHA}', f'"/usr/bin/git" \'checkout\' {SHA}',
+            f'git "-C" repo "checkout" {SHA}', f'git "fetch" origin {SHA}',
+            f'command git "checkout" {SHA}', f'exec "/usr/bin/git" \'checkout\' {SHA}',
+        )
+        for command in valid:
+            with self.subTest(command=command):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in command.splitlines())
+                self.assertEqual(validate_workflow_text(text), [], command)
+
+    def test_env_launcher_uses_command_local_identity(self):
+        invalid = (
+            "env git checkout main", "env /usr/bin/git checkout main", 'env git "checkout" main',
+            "env -i git checkout main", "env -C repo git checkout main", "env --chdir=repo git checkout main",
+            "env -S 'git checkout main'",
+            f"env CORE_SHA=main git checkout \"$CORE_SHA\"",
+            f"env -u CORE_SHA git checkout \"$CORE_SHA\"",
+            f"env --unset=CORE_SHA git checkout \"$CORE_SHA\"",
+            'env "/usr/bin/git" "checkout" main',
+            f"CORE_SHA: {SHA}\nenv --ignore-environment git checkout \"$CORE_SHA\"",
+            f"CORE_SHA: {SHA}\nenv -i git checkout \"$CORE_SHA\"",
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                env = "      CORE_SHA: " + SHA + "\n" if "CORE_SHA:" not in script else ""
+                content = script.replace(f"CORE_SHA: {SHA}\n", "")
+                text = "jobs:\n  test:\n    env:\n" + env
+                text += "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in content.splitlines())
+                self.assertTrue(validate_workflow_text(text), script)
+
+        valid = (
+            f"env git checkout {SHA}", f"env /usr/bin/git checkout {SHA}",
+            f"env CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"env -i CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"env --ignore-environment CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"env --unset=UNUSED CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"env -u UNUSED env CORE_SHA={SHA} \"/usr/bin/git\" \"checkout\" \"$CORE_SHA\"",
+            f"command env CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"exec env -i CORE_SHA={SHA} \"/usr/bin/git\" \"checkout\" \"$CORE_SHA\"",
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertEqual(validate_workflow_text(text), [], script)
+
+        for script in (
+            f"CORE_SHA: {SHA}\nenv -i git checkout \"$CORE_SHA\"",
+            f"CORE_SHA={SHA}\nif condition; then\nCORE_SHA=main\nfi\nenv \"/usr/bin/git\" \"checkout\" \"$CORE_SHA\"",
+            f"if false; then\nCORE_SHA={SHA}\nfi\nenv git checkout \"$CORE_SHA\"",
+        ):
+            with self.subTest(script=script):
+                if script.startswith("CORE_SHA:"):
+                    content = script.replace(f"CORE_SHA: {SHA}\n", "")
+                    yaml_env = f"      CORE_SHA: {SHA}\n"
+                else:
+                    content, yaml_env = script, ""
+                text = "jobs:\n  test:\n    env:\n" + yaml_env + "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in content.splitlines())
+                self.assertTrue(validate_workflow_text(text), script)
+
+    def test_shell_control_flow_merges_branch_and_loop_states(self):
+        sha_a = SHA
+        sha_b = SHA[::-1]
+        invalid = (
+            ("", f"CORE_SHA=main\nif false; then\nCORE_SHA={sha_a}\nfi\ngit checkout \"$CORE_SHA\""),
+            ("", f"CORE_SHA={sha_a}\nif false; then\nCORE_SHA=main\nfi\ngit checkout \"$CORE_SHA\""),
+            ("CORE_SHA: main\n", f"if false; then\nCORE_SHA={sha_a}\nfi\ngit checkout \"$CORE_SHA\""),
+            (f"CORE_SHA: {sha_a}\n", "if false; then\nCORE_SHA=main\nfi\ngit checkout \"$CORE_SHA\""),
+            (f"CORE_SHA: {sha_a}\n", f"if condition; then\nCORE_SHA={sha_b}\nfi\ngit checkout \"$CORE_SHA\""),
+            ("", f"CORE_SHA={sha_a}\nif condition; then\nCORE_SHA={sha_b}\nfi\ngit checkout \"$CORE_SHA\""),
+            ("", f"if condition; then\nCORE_SHA={sha_a}\nelse\nCORE_SHA={sha_b}\nfi\ngit checkout \"$CORE_SHA\""),
+            ("CORE_SHA: main\n", f"while false; do\nCORE_SHA={sha_a}\ndone\ngit checkout \"$CORE_SHA\""),
+            (f"CORE_SHA: {sha_a}\n", "for x in 1 2; do\nCORE_SHA=main\ndone\ngit checkout \"$CORE_SHA\""),
+            (f"CORE_SHA: {sha_a}\n", "(\nif condition; then\nCORE_SHA=main\nfi\ngit checkout \"$CORE_SHA\"\n)"),
+            (f"CORE_SHA: {sha_a}\n", f"if false; then\nCORE_SHA={sha_a}\nelif CORE_SHA=main; then\nCORE_SHA={sha_a}\nfi\ngit checkout \"$CORE_SHA\""),
+        )
+        for env, script in invalid:
+            with self.subTest(env=env, script=script):
+                text = "jobs:\n  test:\n    env:\n" + "".join(f"      {line}\n" for line in env.splitlines())
+                text += "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertTrue(validate_workflow_text(text), script)
+
+        identical_branches = f"if condition; then\nCORE_SHA={sha_a}\nelse\nCORE_SHA={sha_a}\nfi\ngit checkout \"$CORE_SHA\""
+        text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in identical_branches.splitlines())
+        self.assertEqual(validate_workflow_text(text), [])
+
     def test_shell_assignments_are_tracked_in_execution_order(self):
         cases = (
             (f"CORE_SHA: {SHA}\n", "CORE_SHA=main\ngit checkout \"$CORE_SHA\"", False),
@@ -407,7 +504,7 @@ jobs:
                 self.assertTrue(validate_workflow_text(text), script)
 
         valid_scripts = (
-            f"if true; then CORE_SHA={SHA}; fi\ngit checkout \"$CORE_SHA\"",
+            f"if true; then CORE_SHA={SHA}; else CORE_SHA={SHA}; fi\ngit checkout \"$CORE_SHA\"",
             f"/usr/bin/git checkout {SHA}",
             f"/usr/bin/git -C repo checkout {SHA}",
             f"/usr/bin/git fetch origin {SHA}",

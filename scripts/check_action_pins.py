@@ -2,8 +2,10 @@
 """Fail-closed GitHub Actions pin validation with structural YAML analysis.
 
 Dependency refs are checked in their workflow/job/step environment scope.
-Shell parsing is intentionally bounded to git checkout/fetch forms documented
-in ``_checkout_target`` and ``_fetch_targets``; unknown option syntax fails.
+Shell parsing is intentionally bounded to Git checkout/fetch forms documented
+in ``_checkout_target`` and ``_fetch_targets``, simple branch/loop state merges,
+and command/exec plus a small env-launcher subset. Dynamic or unsupported
+dependency command syntax fails closed.
 """
 
 from __future__ import annotations
@@ -289,7 +291,9 @@ def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
     value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
     index = 1
     while index < len(tokens):
-        token = tokens[index]
+        token = _literal_shell_token(tokens[index])
+        if token is None:
+            raise ValueError("dynamic Git subcommand or global option")
         if token in {"checkout", "fetch"}:
             return token, index + 1
         if token in value_options:
@@ -313,33 +317,112 @@ def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
 
 def _is_git_executable(token: str) -> bool:
     """Recognize Git by executable basename, including explicit paths."""
-    word, expandable = _shell_word(token)
-    if expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word):
+    word = _literal_shell_token(token)
+    if word is None:
         return False
     return word.replace("\\", "/").rsplit("/", 1)[-1] == "git"
 
 
 def _is_dynamic_executable(token: str) -> bool:
+    return _literal_shell_token(token) is None
+
+
+def _literal_shell_token(token: str) -> str | None:
+    """Decode a statically literal shell word, returning None for expansion."""
     word, expandable = _shell_word(token)
-    return expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word)
+    if expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word):
+        return None
+    return word
 
 
 def _git_executable_index(tokens: list[str]) -> int | None:
-    """Locate a Git command only in shell command position, after prefixes."""
+    """Compatibility helper for finding a command-position Git invocation."""
+    return _resolve_git_invocation(tokens).executable_index
+
+
+@dataclass
+class GitInvocation:
+    executable_index: int | None
+    environment: dict[str, str]
+    error: str | None = None
+
+
+def _resolve_git_invocation(tokens: list[str], inherited_env: dict[str, str] | None = None) -> GitInvocation:
+    """Resolve shell prefixes and bounded env launchers before locating Git."""
+    environment = dict(inherited_env or {})
     index = 0
-    while index < len(tokens) and tokens[index] in {"if", "then", "elif", "else", "while", "until", "for", "do", "command", "exec"}:
+    control_words = {"if", "then", "elif", "else", "while", "until", "for", "do"}
+    while index < len(tokens) and (tokens[index] in control_words or tokens[index] in {"command", "exec"}):
         index += 1
     while index < len(tokens) and ASSIGNMENT.fullmatch(tokens[index]):
+        match = ASSIGNMENT.fullmatch(tokens[index])
+        assert match is not None
+        environment[match.group(1)] = _assignment_value(match.group(2), environment)
         index += 1
+
+    while index < len(tokens):
+        launcher = _literal_shell_token(tokens[index])
+        if launcher in {"command", "exec"}:
+            index += 1
+            continue
+        if launcher != "env":
+            break
+        index += 1
+        parse_options = True
+        while index < len(tokens):
+            option = _literal_shell_token(tokens[index])
+            if option is None:
+                return GitInvocation(None, environment, "dynamic env option")
+            if parse_options and option == "--":
+                index += 1
+                parse_options = False
+                continue
+            if parse_options and option in {"-i", "--ignore-environment"}:
+                environment.clear()
+                index += 1
+                continue
+            if parse_options and option in {"-u", "--unset"}:
+                if index + 1 >= len(tokens):
+                    return GitInvocation(None, environment, f"env {option} requires a variable name")
+                name = _literal_shell_token(tokens[index + 1])
+                if name is None:
+                    return GitInvocation(None, environment, "dynamic env unset name")
+                environment.pop(name, None)
+                index += 2
+                continue
+            if parse_options and option in {"-C", "--chdir"}:
+                if index + 1 >= len(tokens):
+                    return GitInvocation(None, environment, f"env {option} requires a directory")
+                index += 2
+                continue
+            if parse_options and option.startswith("--unset="):
+                environment.pop(option.split("=", 1)[1], None)
+                index += 1
+                continue
+            if parse_options and option.startswith(("--chdir=", "-C")):
+                index += 1
+                continue
+            if parse_options and option.startswith("-"):
+                return GitInvocation(None, environment, f"unsupported env option {option!r}")
+            match = ASSIGNMENT.fullmatch(option)
+            if match:
+                environment[match.group(1)] = _assignment_value(match.group(2), environment)
+                index += 1
+                continue
+            break
+
     if index < len(tokens) and (_is_git_executable(tokens[index]) or _is_dynamic_executable(tokens[index])):
-        return index
-    return None
+        return GitInvocation(index, environment)
+    return GitInvocation(None, environment)
 
 
 def _contains_git_dependency_operation(script: str) -> bool:
     """Use the normal shell and Git parsers for nested substitution content."""
     for tokens in _shell_commands(script):
-        index = _git_executable_index(tokens)
+        invocation = _resolve_git_invocation(tokens)
+        if invocation.error:
+            return True
+        index = invocation.executable_index
         if index is None:
             continue
         if _is_dynamic_executable(tokens[index]):
@@ -349,9 +432,7 @@ def _contains_git_dependency_operation(script: str) -> bool:
         try:
             subcommand, _ = _git_subcommand(tokens[index:])
         except ValueError:
-            if any(token in {"checkout", "fetch"} for token in tokens[index + 1:]):
-                return True
-            continue
+            return True
         if subcommand in {"checkout", "fetch"}:
             return True
     return False
@@ -370,7 +451,16 @@ def _checkout_target(args: list[str]) -> str:
     positional: list[str] = []
     branch_option = False
     while index < len(args):
-        token = args[index]
+        raw_token = args[index]
+        token = _literal_shell_token(raw_token)
+        if token is None:
+            # A dynamic positional revision is retained for scope-aware SHA
+            # resolution; a dynamic option cannot be parsed safely.
+            if raw_token.startswith("-"):
+                raise ValueError("dynamic git checkout option")
+            positional.append(raw_token)
+            index += 1
+            continue
         if token == "--":
             positional.extend(args[index + 1:])
             break
@@ -403,7 +493,7 @@ def _checkout_target(args: list[str]) -> str:
             continue
         if token.startswith("-"):
             raise ValueError(f"unsupported git checkout option {token!r}")
-        positional.append(token)
+        positional.append(raw_token)
         index += 1
     if branch_option:
         if len(positional) != 1:
@@ -421,7 +511,9 @@ def _fetch_targets(args: list[str]) -> list[str]:
     value_options = {"--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--filter", "--server-option", "-j"}
     index = 0
     while index < len(args):
-        token = args[index]
+        token = _literal_shell_token(args[index])
+        if token is None:
+            raise ValueError("dynamic git fetch option or refspec")
         if token == "--":
             index += 1
             break
@@ -446,7 +538,11 @@ def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
         if "__ambiguous_git_checkout_fetch__" in command_tokens:
             targets.append(("invalid", ""))
             continue
-        git_index = _git_executable_index(command_tokens)
+        invocation = _resolve_git_invocation(command_tokens)
+        if invocation.error:
+            targets.append(("invalid", ""))
+            continue
+        git_index = invocation.executable_index
         if git_index is None:
             continue
         try:
@@ -462,8 +558,7 @@ def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
                 targets.extend((subcommand, target) for target in _fetch_targets(command_tokens[git_index + args_index:]))
         except ValueError:
             # A malformed git checkout/fetch line is not silently ignored.
-            if re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch)\b", " ".join(command_tokens)):
-                targets.append(("invalid", ""))
+            targets.append(("invalid", ""))
     return targets
 
 
@@ -497,6 +592,20 @@ def _analyze_shell_script(
     """Validate Git refs while applying simple shell assignments in order."""
     errors: list[str] = []
     state = ShellState(initial_env.copy())
+    flow_stack: list[dict[str, Any]] = []
+
+    def restore_environment(values: dict[str, str]) -> None:
+        state.env.clear()
+        state.env.update(values)
+
+    def merge_environments(outcomes: list[dict[str, str]]) -> dict[str, str]:
+        keys = set().union(*(outcome.keys() for outcome in outcomes))
+        merged: dict[str, str] = {}
+        for key in keys:
+            values = [outcome.get(key, "") for outcome in outcomes]
+            merged[key] = values[0] if all(value == values[0] for value in values) else ""
+        return merged
+
     for kind, tokens in _shell_events(script):
         if kind == "open":
             state.enter_group()
@@ -511,16 +620,83 @@ def _analyze_shell_script(
         if not tokens:
             continue
 
+        marker = tokens[0]
+        if marker in {"if", "while", "until", "for"}:
+            flow_stack.append({
+                "kind": "if" if marker == "if" else "loop",
+                "base": state.env.copy(),
+                "branches": [],
+                "has_else": False,
+                "phase": "condition",
+                "group_depth": len(state.scopes),
+            })
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+            # A for-loop assignment changes its iteration variable; if that is
+            # a protected ref identity, preserve uncertainty conservatively.
+            if marker == "for" and len(tokens) > 1 and tokens[0] in protected_keys:
+                state.env[tokens[0]] = ""
+        elif marker in {"then", "do"}:
+            if not flow_stack:
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack[-1]
+            if frame["phase"] == "condition" and not frame["branches"]:
+                frame["base"] = state.env.copy()
+            frame["phase"] = "body"
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+        elif marker in {"else", "elif"}:
+            if not flow_stack or flow_stack[-1]["kind"] != "if" or flow_stack[-1]["phase"] != "body":
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack[-1]
+            frame["branches"].append(state.env.copy())
+            restore_environment(frame["base"])
+            frame["has_else"] = marker == "else"
+            frame["phase"] = "body" if marker == "else" else "condition"
+            if marker == "elif":
+                predicate = tokens[1:]
+                mutated: set[str] = set()
+                if predicate and ASSIGNMENT.fullmatch(predicate[0]):
+                    match = ASSIGNMENT.fullmatch(predicate[0])
+                    assert match is not None
+                    mutated.add(match.group(1))
+                elif predicate and predicate[0] == "export":
+                    for token in predicate[1:]:
+                        match = ASSIGNMENT.fullmatch(token)
+                        if match:
+                            mutated.add(match.group(1))
+                elif predicate and predicate[0] == "unset":
+                    mutated.update(predicate[1:])
+                for key in mutated & protected_keys:
+                    frame["base"][key] = ""
+                    state.env[key] = ""
+                    for branch in frame["branches"]:
+                        branch[key] = ""
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+        elif marker in {"fi", "done"}:
+            expected_kind = "if" if marker == "fi" else "loop"
+            if not flow_stack or flow_stack[-1]["kind"] != expected_kind:
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack.pop()
+            outcomes = list(frame["branches"])
+            outcomes.append(state.env.copy())
+            if frame["kind"] == "loop" or not frame["has_else"]:
+                outcomes.append(frame["base"])
+            restore_environment(merge_environments(outcomes))
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+
         # Commands that can mutate arbitrary shell state are outside the
         # supported static grammar. If protected names are in scope, fail
         # closed rather than carrying forward a possibly stale SHA.
-        control_words = {"if", "then", "elif", "else", "while", "until", "for", "do"}
-        command_offset = 0
-        while command_offset < len(tokens) and tokens[command_offset] in control_words:
-            command_offset += 1
-        if command_offset == len(tokens):
-            continue
-        tokens = tokens[command_offset:]
         command_name = tokens[0]
         source_is_venv_activation = (
             command_name == "source"
@@ -576,7 +752,11 @@ def _analyze_shell_script(
             command_env = state.env
             command_tokens = tokens
 
-        git_index = _git_executable_index(command_tokens)
+        invocation = _resolve_git_invocation(command_tokens, command_env)
+        if invocation.error:
+            errors.append(f"{location}: unsupported env/Git launcher syntax: {invocation.error}")
+            continue
+        git_index = invocation.executable_index
         if git_index is None:
             # Unknown declarations of protected values are not accepted.
             if command_name in {"declare", "typeset", "local", "readonly"}:
@@ -597,16 +777,20 @@ def _analyze_shell_script(
             subcommand, args_index = _git_subcommand(command_tokens[git_index:])
             if subcommand == "checkout":
                 target = _checkout_target(command_tokens[git_index + args_index:])
-                error = _validate_target(target, command_env, location, subcommand)
+                error = _validate_target(target, invocation.environment, location, subcommand)
                 if error:
                     errors.append(error)
             elif subcommand == "fetch":
                 for target in _fetch_targets(command_tokens[git_index + args_index:]):
-                    error = _validate_target(target, command_env, location, subcommand)
+                    error = _validate_target(target, invocation.environment, location, subcommand)
                     if error:
                         errors.append(error)
         except ValueError:
             errors.append(f"{location}: unsupported or ambiguous git checkout/fetch syntax")
+    if flow_stack:
+        errors.append(f"{location}: unclosed shell control clause")
+        for key in protected_keys:
+            state.env[key] = ""
     if state.scopes and (protected_keys or _git_dependency_targets(script)):
         errors.append(f"{location}: unclosed shell group")
     return errors

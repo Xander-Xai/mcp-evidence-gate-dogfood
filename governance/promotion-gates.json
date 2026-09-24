@@ -285,6 +285,15 @@
     ],
     "migration_target": "Replace legacy anchors with a single required promotion-gate context when repository settings governance is updated."
   },
+  "package_archive_acceptance_lane": {
+    "status": "CURRENT",
+    "workflow": ".github/workflows/package-archive-supported-target-proof.yml",
+    "producer_sha": "6d533cd9a6a25a4b1cb06eefceff376551686a4b",
+    "historical_superseded_workflow": ".github/workflows/package-archive-coverage-dogfood.yml",
+    "historical_candidate_producer_sha": "0c18587b25669bd2f8a29331acf2392aaa3a7633",
+    "supersession_evidence": "The supported-target proof added explicit no-target and supported-target controls, then added a promoted-main package archive oracle in commit 595c621e4307de5b5e149a5b129faf441025dce7. Hosted run 35696082964 passed on head 371129ead873bfea2e74e0a4809a9ff627f433d6.",
+    "historical_failed_pr_run": "35823624989"
+  },
   "runtime_evidence_retention": {
     "artifact_name_prefix": "real-trivy-runtime-evidence-",
     "retention_days": 90,

@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from scripts.check_action_pins import semantic_action_refs, validate_workflow_text, validate_tree
+from scripts.check_action_pins import dependency_identity_keys, semantic_action_refs, validate_workflow_text, validate_tree
 
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -48,10 +48,17 @@ jobs:
   test:
     env:
       PRODUCER_SHA: {SHA}
-      CORE_SHA: {SHA}
-      CORE_PR_HEAD: {SHA}
+      GATE_SHA: {SHA}
+      PRODUCER_PR_HEAD_SHA: {SHA}
+      PRODUCER_REVIEWED_SHA: {SHA}
+      CORE_CANDIDATE_SHA: {SHA}
     steps:
-      - run: git checkout --detach "$PRODUCER_SHA"
+      - run: |
+          git checkout --detach "$PRODUCER_SHA"
+          git checkout "$GATE_SHA"
+          git fetch origin "$PRODUCER_PR_HEAD_SHA"
+          git checkout --detach "$PRODUCER_REVIEWED_SHA"
+          git checkout "$CORE_CANDIDATE_SHA"
 """
         self.assertEqual(validate_workflow_text(text), [])
 
@@ -61,14 +68,49 @@ jobs:
   test:
     env:
       PRODUCER_SHA: 2aeeb6c
-      CORE_SHA: 1234567890ab
-      CORE_PR_HEAD: abcdefg
+      GATE_SHA: 12345678
+      PRODUCER_PR_HEAD_SHA: 1234567890ab
+      PRODUCER_REVIEWED_SHA: main
+      CORE_CANDIDATE_SHA: v1.2.3
+    steps:
+      - run: |
+          git checkout --detach "$PRODUCER_SHA"
+          git checkout "$GATE_SHA"
+          git fetch origin "$PRODUCER_PR_HEAD_SHA"
+          git checkout --detach "$PRODUCER_REVIEWED_SHA"
+          git checkout "$CORE_CANDIDATE_SHA"
+"""
+        errors = validate_workflow_text(text)
+        self.assertEqual(len(errors), 5)
+        self.assertTrue(all("full 40-character commit SHA" in error for error in errors))
+
+    def test_expression_empty_and_whitespace_identity_values_fail_closed(self):
+        invalid_values = (
+            "${{ vars.PRODUCER_SHA }}",
+            '"${{ vars.PRODUCER_SHA }}"',
+            "main",
+            "v1.2.3",
+            "1234567",
+            "",
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                text = f"""
+jobs:
+  test:
+    env:
+      PRODUCER_SHA: {value}
     steps:
       - run: git checkout --detach "$PRODUCER_SHA"
 """
-        errors = validate_workflow_text(text)
-        self.assertEqual(len(errors), 3)
-        self.assertTrue(all("full 40-character commit SHA" in error for error in errors))
+                self.assertTrue(validate_workflow_text(text))
+
+    def test_checkout_identity_discovery_covers_current_workflows(self):
+        root = Path(__file__).resolve().parents[1]
+        discovered: set[str] = set()
+        for workflow in (root / ".github" / "workflows").glob("*.y*ml"):
+            discovered.update(dependency_identity_keys(workflow.read_text(encoding="utf-8")))
+        self.assertTrue({"GATE_SHA", "PRODUCER_PR_HEAD_SHA", "PRODUCER_REVIEWED_SHA", "CORE_CANDIDATE_SHA"}.issubset(discovered))
 
     def test_multifield_step_refs_are_validated(self):
         text = f"""

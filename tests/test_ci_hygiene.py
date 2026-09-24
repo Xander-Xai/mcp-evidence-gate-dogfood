@@ -541,6 +541,87 @@ jobs:
                 text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
                 self.assertEqual(validate_workflow_text(text), [])
 
+    def test_cloned_dependency_must_be_pinned_to_selected_commit(self):
+        sha_a = SHA
+        sha_b = SHA[::-1]
+
+        def check(script):
+            text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            "git clone https://github.com/owner/dependency.git dep",
+            "git clone --branch main https://github.com/owner/dependency.git dep",
+            "git clone repo dep\ngit -C dep checkout main",
+            f"git clone repo dep\ngit -C dep fetch origin {sha_a}",
+            f"git clone repo-a dep-a\ngit clone repo-b dep-b\ngit -C dep-a checkout {sha_a}",
+            f"git clone repo dep\ngit -C other checkout {sha_a}",
+            f"env -C parent git clone repo dep\ngit -C dep checkout {sha_a}",
+            "if condition; then\ngit clone repo dep\nfi",
+            f"if condition; then\ngit clone repo dep\ngit -C dep checkout {sha_a}\nelse\ngit clone repo dep\ngit -C dep checkout {sha_b}\nfi",
+            'git clone "https://example.invalid/repo.git" "$UNKNOWN_DEST"',
+            "git clone repo",
+            "ignored=$(git clone repo dep)",
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                self.assertTrue(check(script), script)
+
+        valid = (
+            f"git clone repo dep\ngit -C dep checkout {sha_a}",
+            f"git clone --no-checkout repo dep\ngit -C dep checkout --detach {sha_a}",
+            f'"/usr/bin/git" clone repo dep\ngit -C dep checkout {sha_a}',
+            f"env git clone repo dep\ncommand git -C dep checkout {sha_a}",
+            f"command git clone repo dep\nexec git -C dep checkout {sha_a}",
+            f"git -C parent clone repo dep\ngit -C parent/dep checkout {sha_a}",
+            f"env -C parent git clone repo dep\ngit -C parent/dep checkout {sha_a}",
+            f"env --chdir=parent git clone repo dep\ngit -C parent/dep checkout {sha_a}",
+            f"git clone repo-a dep-a\ngit clone repo-b dep-b\ngit -C dep-a checkout {sha_a}\ngit -C dep-b checkout {sha_b}",
+            f"(git clone repo dep)\ngit -C dep checkout {sha_a}",
+            f"git clone --depth 1 repo dep\ngit -C dep checkout {sha_a}",
+            f"git clone repo \"$RUNNER_TEMP/core\"\ngit -C \"$RUNNER_TEMP/core\" checkout --detach \"$CORE_SHA\"",
+            f"if condition; then\ngit clone repo dep\ngit -C dep checkout {sha_a}\nfi",
+            f"{{ git clone repo dep; git -C dep checkout {sha_a}; }}",
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                if '"$CORE_SHA"' in script:
+                    text = "jobs:\n  test:\n    env:\n      CORE_SHA: " + sha_a + "\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                    self.assertEqual(validate_workflow_text(text), [], script)
+                else:
+                    self.assertEqual(check(script), [], script)
+
+    def test_brace_groups_persist_shell_assignments_but_subshells_do_not(self):
+        sha = SHA
+
+        def check(script):
+            text = f"jobs:\n  test:\n    env:\n      CORE_SHA: {sha}\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            f"{{ CORE_SHA=main; }}\ngit checkout \"$CORE_SHA\"",
+            f"{{\nCORE_SHA=main\n}}\ngit checkout \"$CORE_SHA\"",
+            f"{{ CORE_SHA=main; git checkout \"$CORE_SHA\"; }}",
+            f"{{ CORE_SHA=main; }}\nif condition; then\ntrue\nfi\ngit checkout \"$CORE_SHA\"",
+            f"{{\nif condition; then\nCORE_SHA=main\nfi\n}}\ngit checkout \"$CORE_SHA\"",
+            f"{{\n( true )\nCORE_SHA=main\n}}\ngit checkout \"$CORE_SHA\"",
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                self.assertTrue(check(script), script)
+
+        valid = (
+            f"{{ CORE_SHA={sha}; }}\ngit checkout \"$CORE_SHA\"",
+            f"{{\nCORE_SHA={sha}\n}}\ngit checkout \"$CORE_SHA\"",
+            f"( CORE_SHA=main )\ngit checkout \"$CORE_SHA\"",
+            f"{{\n( CORE_SHA=main )\n}}\ngit checkout \"$CORE_SHA\"",
+            f"(\n{{ CORE_SHA=main; }}\n)\ngit checkout \"$CORE_SHA\"",
+            f"{{\n( true )\nCORE_SHA={sha}\n}}\ngit checkout \"$CORE_SHA\"",
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                self.assertEqual(check(script), [], script)
+
     def test_quoted_parentheses_remain_argument_data(self):
         text = """
 jobs:

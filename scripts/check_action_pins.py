@@ -11,7 +11,7 @@ SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 EXTERNAL = re.compile(r"^[^/@\s]+/[^@\s]+@(.+)$")
 DEPENDENCY_COMMAND = re.compile(r"\bgit\b[^\n]*(?:\bcheckout\b|\bfetch\b)[^\n]*")
 SHELL_VARIABLE = re.compile(r"\$\{?([A-Z][A-Z0-9_]*)\}?")
-ACTION_REF_EXPRESSION = re.compile(r"^\s*ref:\s*\$\{\{\s*env\.([A-Z][A-Z0-9_]*)\s*\}\}\s*$")
+ACTION_REF_EXPRESSION = re.compile(r"^\$\{\{\s*env\.([A-Z][A-Z0-9_]*)\s*\}\}$")
 KEY_DEFINITION = re.compile(r"^\s*([A-Z][A-Z0-9_]*):(?:\s+(.*?))?\s*$")
 
 
@@ -156,11 +156,43 @@ def dependency_identity_keys(text: str) -> set[str]:
         if indent == step_indent + 4 and stripped.startswith("uses:"):
             uses_checkout = stripped[6:].strip().startswith("actions/checkout@")
             continue
-        if uses_checkout:
-            match = ACTION_REF_EXPRESSION.match(raw)
+        if uses_checkout and stripped.startswith("ref:"):
+            value = _without_yaml_comment(stripped[4:].strip())
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            match = ACTION_REF_EXPRESSION.fullmatch(value)
             if match:
                 keys.add(match.group(1))
     return keys
+
+
+def _checkout_action_refs(text: str) -> list[tuple[int, str]]:
+    refs: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    step_indent: int | None = None
+    uses_checkout = False
+    for number, raw in enumerate(lines, 1):
+        stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+        if stripped == "steps:":
+            step_indent = indent
+            uses_checkout = False
+            continue
+        if step_indent is None:
+            continue
+        if indent <= step_indent and stripped:
+            step_indent = None
+            uses_checkout = False
+            continue
+        if indent == step_indent + 2 and stripped.startswith("-"):
+            uses_checkout = bool(re.match(r"-\s*uses:\s*actions/checkout@", stripped))
+            continue
+        if indent == step_indent + 4 and stripped.startswith("uses:"):
+            uses_checkout = stripped[6:].strip().startswith("actions/checkout@")
+            continue
+        if uses_checkout and stripped.startswith("ref:"):
+            refs.append((number, _without_yaml_comment(stripped[4:].strip())))
+    return refs
 
 
 def _identity_values(text: str, keys: set[str]) -> list[tuple[int, str, str]]:
@@ -185,6 +217,16 @@ def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
     for number, key, value in _identity_values(text, keys):
         if not SHA.fullmatch(value):
             errors.append(f"{source}:line {number}: {key} must use a full 40-character commit SHA")
+    for number, raw_value in _checkout_action_refs(text):
+        value = raw_value
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        if SHA.fullmatch(value):
+            continue
+        indirection = ACTION_REF_EXPRESSION.fullmatch(value)
+        if indirection and any(key == indirection.group(1) and SHA.fullmatch(identity) for _, key, identity in _identity_values(text, keys)):
+            continue
+        errors.append(f"{source}:line {number}: actions/checkout ref must be a full 40-character commit SHA or validated env identity")
     for location, ref in semantic_action_refs(text, source):
         error = validate_ref(ref, location)
         if error:

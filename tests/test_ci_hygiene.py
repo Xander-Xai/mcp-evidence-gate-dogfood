@@ -105,6 +105,27 @@ jobs:
 """
                 self.assertTrue(validate_workflow_text(text))
 
+    def test_actions_checkout_ref_requires_sha_or_validated_identity(self):
+        template = """
+jobs:
+  test:
+    env:
+      CORE_SHA: {identity}
+    steps:
+      - uses: actions/checkout@{action_sha}
+        with:
+          repository: owner/dependency
+          ref: {ref}
+"""
+        valid_refs = (SHA, "${{ env.CORE_SHA }}", '"${{ env.CORE_SHA }}"')
+        for ref in valid_refs:
+            with self.subTest(ref=ref):
+                self.assertEqual(validate_workflow_text(template.format(identity=SHA, action_sha=SHA, ref=ref)), [])
+        for ref in ("main", "v1.2.3", "${{ vars.CORE_SHA }}", '"${{ vars.CORE_SHA }}"', ""):
+            with self.subTest(ref=ref):
+                errors = validate_workflow_text(template.format(identity=SHA, action_sha=SHA, ref=ref))
+                self.assertTrue(any("actions/checkout ref" in error for error in errors))
+
     def test_checkout_identity_discovery_covers_current_workflows(self):
         root = Path(__file__).resolve().parents[1]
         discovered: set[str] = set()

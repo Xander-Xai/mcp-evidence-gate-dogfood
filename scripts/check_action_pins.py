@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail-closed semantic GitHub Actions pin validation using only stdlib."""
+"""Fail-closed GitHub Actions pin validation with structural YAML analysis.
+
+Dependency refs are checked in their workflow/job/step environment scope.
+Shell parsing is intentionally bounded to git checkout/fetch forms documented
+in ``_checkout_target`` and ``_fetch_targets``; unknown option syntax fails.
+"""
 
 from __future__ import annotations
 
@@ -7,22 +12,27 @@ import re
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 EXTERNAL = re.compile(r"^[^/@\s]+/[^@\s]+@(.+)$")
 ACTION_REF_EXPRESSION = re.compile(r"^\$\{\{\s*env\.([A-Z][A-Z0-9_]*)\s*\}\}$")
-KEY_DEFINITION = re.compile(r"^\s*([A-Z][A-Z0-9_]*):(?:\s+(.*?))?\s*$")
+SHELL_ENV = re.compile(r"^\$\{?([A-Z][A-Z0-9_]*)\}?$")
 
 
-def _value(raw: str) -> str:
-    value = raw.split(" #", 1)[0].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        value = value[1:-1]
-    return value
+def _yaml_value(value: Any) -> str:
+    """Convert a YAML scalar to text without discarding quotes' content."""
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def validate_ref(ref: str, location: str) -> str | None:
-    ref = _value(ref)
+    ref = ref.strip()
     if ref.startswith("./") or ref.startswith("../"):
         return None
     if ref.startswith("docker://"):
@@ -33,254 +43,314 @@ def validate_ref(ref: str, location: str) -> str | None:
     return None
 
 
-def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str, str]]:
-    """Return only jobs.<id>.uses and jobs.<id>.steps[*].uses references."""
-    refs: list[tuple[str, str]] = []
-    in_jobs = False
-    current_job: str | None = None
-    in_steps = False
-    step_indent: int | None = None
-    step_active = False
-    for number, raw in enumerate(text.splitlines(), 1):
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip(" "))
-        stripped = raw.strip()
-        if stripped == "jobs:":
-            in_jobs = True
-            current_job = None
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not in_jobs:
-            continue
-        if indent <= 1 and stripped and not stripped.startswith("jobs:"):
-            in_jobs = False
-            current_job = None
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if indent == 2 and stripped.endswith(":") and not stripped.startswith("-"):
-            current_job = stripped[:-1].strip(" '\"")
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if current_job is None:
-            continue
-        if indent == 4 and stripped.startswith("uses:"):
-            refs.append((f"{source}:jobs.{current_job}.uses:{number}", _value(stripped[6:].strip())))
-            continue
-        if indent == 4 and stripped == "steps:":
-            in_steps = True
-            step_indent = None
-            step_active = False
-            continue
-        if indent == 4 and stripped and not stripped.startswith("#"):
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not in_steps:
-            continue
-        if step_indent is None and indent > 4 and stripped.startswith("-"):
-            step_indent = indent
-            step_active = True
-        elif step_indent is not None and indent == step_indent and stripped.startswith("-"):
-            step_active = True
-        elif step_indent is not None and indent < step_indent:
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not step_active or step_indent is None:
-            continue
-        if stripped.startswith("- uses:") and indent == step_indent:
-            refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[8:].strip())))
-        elif indent == step_indent + 2 and stripped.startswith("uses:"):
-            refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[6:].strip())))
-    return refs
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
-def _without_yaml_comment(value: str) -> str:
-    quote: str | None = None
-    escaped = False
-    for index, char in enumerate(value):
-        if escaped:
-            escaped = False
+def _workflow(text: str, source: str) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return None, [f"{source}: invalid workflow YAML: {exc}"]
+    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+        return None, [f"{source}: jobs mapping is required"]
+    return document, []
+
+
+def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = job.get("steps", [])
+    if not isinstance(steps, list):
+        return []
+    return [_mapping(step) for step in steps]
+
+
+def _effective_env(*scopes: Any) -> dict[str, str]:
+    """Merge outer-to-inner workflow, job, and step env mappings."""
+    effective: dict[str, str] = {}
+    for scope in scopes:
+        for key, value in _mapping(scope).items():
+            effective[str(key)] = _yaml_value(value)
+    return effective
+
+
+def _resolved_sha(value: str, env: dict[str, str]) -> bool:
+    value = value.strip()
+    if SHA.fullmatch(value):
+        return True
+    match = ACTION_REF_EXPRESSION.fullmatch(value)
+    if match:
+        return bool(SHA.fullmatch(env.get(match.group(1), "")))
+    shell_match = SHELL_ENV.fullmatch(value)
+    if shell_match:
+        return bool(SHA.fullmatch(env.get(shell_match.group(1), "")))
+    return False
+
+
+def _shell_commands(script: str) -> list[list[str]]:
+    """Split a shell block on newlines and command separators using shlex."""
+    commands: list[list[str]] = []
+    pending = ""
+    for raw_line in script.splitlines():
+        line = pending + raw_line.strip()
+        if line.endswith("\\"):
+            pending = line[:-1] + " "
             continue
-        if char == "\\" and quote == '"':
-            escaped = True
-            continue
-        if char in "'\"":
-            if quote == char:
-                quote = None
-            elif quote is None:
-                quote = char
-            continue
-        if char == "#" and quote is None and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-    return value.strip()
-
-
-def _yaml_scalar(value: str) -> str:
-    value = _without_yaml_comment(value)
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        return value[1:-1]
-    return value
-
-
-def _git_dependency_targets(text: str) -> list[tuple[str, str]]:
-    """Return explicit checkout refs and fetch refspecs from workflow shell lines."""
-    targets: list[tuple[str, str]] = []
-    matches = list(re.finditer(r"(?<![\w-])git\b", text))
-    for index, match in enumerate(matches):
-        line_end = text.find("\n", match.start())
-        if line_end < 0:
-            line_end = len(text)
-        end = min(line_end, matches[index + 1].start()) if index + 1 < len(matches) else line_end
-        command_text = text[match.end():end]
+        pending = ""
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        current: list[str] = []
         try:
-            tokens = shlex.split(command_text, comments=True)
+            tokens = list(lexer)
         except ValueError:
-            # Malformed quoting in a line containing a dependency command must
-            # fail closed instead of suppressing identity discovery.
-            if re.search(r"\b(checkout|fetch)\b", command_text):
-                targets.append(("invalid", ""))
+            # Shell blocks routinely contain multiline quoting and template
+            # syntax unrelated to Git. Only fail closed when the malformed
+            # line itself appears to contain a protected Git operation.
+            if re.search(r"\bgit\b.*\b(checkout|fetch)\b", line):
+                commands.append(["git", "__ambiguous_git_checkout_fetch__"])
             continue
-        command_index = next((i for i, token in enumerate(tokens) if token in {"checkout", "fetch"}), None)
-        if command_index is None:
-            continue
-        command = tokens[command_index]
-        arguments = tokens[command_index + 1:]
-        if command == "checkout":
-            if "--" in arguments:
-                before_path = arguments[:arguments.index("--")]
+        for token in tokens:
+            if token and all(char in ";&|" for char in token):
+                if current:
+                    commands.append(current)
+                    current = []
             else:
-                before_path = arguments
-            target = next((token for token in before_path if not token.startswith("-")), None)
-            if target is not None:
-                targets.append((command, target.rstrip(");&|")))
-        else:
-            remote_index = next((i for i, token in enumerate(arguments) if not token.startswith("-")), None)
-            if remote_index is None:
+                current.append(token)
+        if current:
+            commands.append(current)
+    return commands
+
+
+def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
+    """Locate checkout/fetch after supported global git options."""
+    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"checkout", "fetch"}:
+            return token, index + 1
+        if token in value_options:
+            if index + 1 >= len(tokens):
+                raise ValueError(f"git {token} requires an argument")
+            index += 2
+            continue
+        if token.startswith(("-C", "-c", "--git-dir=", "--work-tree=", "--namespace=", "--config-env=")):
+            index += 1
+            continue
+        if token.startswith("-"):
+            # Support ordinary no-argument global switches, but do not guess
+            # at unfamiliar options that may consume the following operand.
+            if token in {"--no-pager", "--no-optional-locks", "--bare", "--literal-pathspecs"}:
+                index += 1
                 continue
-            for target in arguments[remote_index + 1:]:
-                if not target.startswith("-"):
-                    targets.append((command, target.rstrip(");&|")))
+            raise ValueError(f"unsupported git global option {token!r}")
+        return None, index
+    return None, index
+
+
+def _checkout_target(args: list[str]) -> str | None:
+    """Return checkout's revision operand; support -b/-B and --orphan arity.
+
+    Supported options: --detach, -b/--branch, -B, --orphan, --force/-f,
+    --quiet/-q, --guess/--no-guess, --overlay/--no-overlay,
+    --recurse-submodules[=<pathspec>], and --no-recurse-submodules. Unknown
+    or malformed options fail closed. ``--`` ends options; pathspec checkout
+    (two positional operands) is rejected as ambiguous for dependency pinning.
+    """
+    index = 0
+    positional: list[str] = []
+    branch_option = False
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            positional.extend(args[index + 1:])
+            break
+        if token in {"-b", "-B", "--branch", "--orphan"}:
+            if index + 1 >= len(args):
+                raise ValueError(f"{token} requires a branch name")
+            if token != "--orphan":
+                branch_option = True
+            index += 2
+            continue
+        if token.startswith("--branch="):
+            branch_option = True
+            index += 1
+            continue
+        if token.startswith("--orphan="):
+            index += 1
+            continue
+        if token in {"--detach", "-d", "--force", "-f", "--quiet", "-q", "--guess", "--no-guess", "--overlay", "--no-overlay", "--no-recurse-submodules"}:
+            index += 1
+            continue
+        if token == "--recurse-submodules":
+            index += 1
+            if index < len(args) and not args[index].startswith("-"):
+                # This option's optional pathspec is only consumed when
+                # explicitly attached by Git; a separate token is a ref.
+                pass
+            continue
+        if token.startswith("--recurse-submodules="):
+            index += 1
+            continue
+        if token.startswith("-"):
+            raise ValueError(f"unsupported git checkout option {token!r}")
+        positional.append(token.rstrip(");&|"))
+        index += 1
+    if branch_option:
+        if len(positional) != 1:
+            raise ValueError("git checkout -b/-B requires exactly one start-point revision")
+        return positional[0]
+    if len(positional) > 1:
+        raise ValueError("ambiguous git checkout with multiple positional operands")
+    return positional[0] if positional else None
+
+
+def _fetch_targets(args: list[str]) -> list[str]:
+    """Parse bounded ``git fetch [options] remote [refspec ...]`` syntax."""
+    value_options = {"--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--filter", "--server-option", "-j"}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            index += 1
+            break
+        if token in value_options:
+            if index + 1 >= len(args):
+                raise ValueError(f"git fetch {token} requires an argument")
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    if index >= len(args):
+        return []
+    return [token.rstrip(");&|") for token in args[index + 1:] if not token.startswith("-")]
+
+
+def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
+    """Extract bounded Git checkout/fetch targets from a shell script."""
+    targets: list[tuple[str, str]] = []
+    for command_tokens in _shell_commands(script):
+        if "__ambiguous_git_checkout_fetch__" in command_tokens:
+            targets.append(("invalid", ""))
+            continue
+        try:
+            git_index = command_tokens.index("git")
+        except ValueError:
+            continue
+        try:
+            subcommand, args_index = _git_subcommand(command_tokens[git_index:])
+            if subcommand == "checkout":
+                target = _checkout_target(command_tokens[git_index + args_index:])
+                if target is not None:
+                    targets.append((subcommand, target))
+            elif subcommand == "fetch":
+                targets.extend((subcommand, target) for target in _fetch_targets(command_tokens[git_index + args_index:]))
+        except ValueError:
+            # A malformed git checkout/fetch line is not silently ignored.
+            if re.search(r"\bgit\b.*\b(checkout|fetch)\b", " ".join(command_tokens)):
+                targets.append(("invalid", ""))
     return targets
 
 
+def _extract_env_reference(value: str, pattern: re.Pattern[str]) -> str | None:
+    match = pattern.fullmatch(value.strip())
+    return match.group(1) if match else None
+
+
 def dependency_identity_keys(text: str) -> set[str]:
-    """Find env keys that feed git checkout/fetch or actions/checkout refs."""
+    """Find environment keys that feed shell or actions/checkout refs."""
+    document, errors = _workflow(text, "workflow")
+    if errors or document is None:
+        return set()
     keys: set[str] = set()
-    for _, target in _git_dependency_targets(text):
-        variable = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", target)
-        if variable:
-            keys.add(variable.group(1))
-    for _, value in _checkout_action_refs(text):
-        match = ACTION_REF_EXPRESSION.fullmatch(_yaml_scalar(value))
-        if match:
-            keys.add(match.group(1))
+    workflow_env = _mapping(document.get("env"))
+    for job in _mapping(document.get("jobs")).values():
+        job = _mapping(job)
+        for step in _steps(job):
+            for _, target in _git_dependency_targets(_yaml_value(step.get("run"))):
+                name = _extract_env_reference(target, SHELL_ENV)
+                if name:
+                    keys.add(name)
+            with_values = _mapping(step.get("with"))
+            name = _extract_env_reference(_yaml_value(with_values.get("ref")), ACTION_REF_EXPRESSION)
+            if name:
+                keys.add(name)
     return keys
 
 
-def _checkout_action_refs(text: str) -> list[tuple[int, str]]:
-    refs: list[tuple[int, str]] = []
-    lines = text.splitlines()
-    list_indent: int | None = None
-    step_lines: list[tuple[int, str]] = []
-
-    def collect_step() -> None:
-        if list_indent is None or not step_lines:
-            return
-        first_number, first_line = step_lines[0]
-        first = first_line.strip()
-        inline = re.match(r"-\s*uses:\s*(.+)$", first)
-        uses = _yaml_scalar(inline.group(1)) if inline else ""
-        refs_in_step: list[tuple[int, str]] = []
-        for number, raw in step_lines[1:]:
-            stripped = raw.strip()
-            indent = len(raw) - len(raw.lstrip(" "))
-            if indent == list_indent + 2 and stripped.startswith("uses:"):
-                uses = _yaml_scalar(stripped[6:].strip())
-            elif indent == list_indent + 4 and stripped.startswith("ref:"):
-                refs_in_step.append((number, _yaml_scalar(stripped[4:].strip())))
-        if uses.startswith("actions/checkout@"):
-            refs.extend(refs_in_step)
-
-    steps_indent: int | None = None
-    for number, raw in enumerate(lines, 1):
-        stripped = raw.strip()
-        indent = len(raw) - len(raw.lstrip(" "))
-        if stripped == "steps:":
-            collect_step()
-            step_lines = []
-            steps_indent = indent
-            list_indent = indent + 2
-            continue
-        if steps_indent is None:
-            continue
-        if stripped and indent <= steps_indent:
-            collect_step()
-            step_lines = []
-            steps_indent = None
-            list_indent = None
-            continue
-        if list_indent is not None and indent == list_indent and stripped.startswith("-"):
-            collect_step()
-            step_lines = [(number, raw)]
-        elif step_lines:
-            step_lines.append((number, raw))
-    collect_step()
+def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str, str]]:
+    """Return reusable-job and step action ``uses`` values structurally."""
+    document, _ = _workflow(text, source)
+    if document is None:
+        return []
+    refs: list[tuple[str, str]] = []
+    for job_name, raw_job in _mapping(document.get("jobs")).items():
+        job = _mapping(raw_job)
+        job_uses = job.get("uses")
+        if isinstance(job_uses, str):
+            refs.append((f"{source}:jobs.{job_name}.uses", job_uses.strip()))
+        for index, step in enumerate(_steps(job)):
+            uses = step.get("uses")
+            if isinstance(uses, str):
+                refs.append((f"{source}:jobs.{job_name}.steps[{index}].uses", uses.strip()))
     return refs
 
 
-def _identity_values(text: str, keys: set[str]) -> list[tuple[int, str, str]]:
-    values: list[tuple[int, str, str]] = []
-    for number, raw in enumerate(text.splitlines(), 1):
-        match = KEY_DEFINITION.match(raw)
-        if match and match.group(1) in keys:
-            value = _without_yaml_comment(match.group(2) or "")
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                value = value[1:-1]
-            values.append((number, match.group(1), value))
-    return values
+def _validate_target(target: str, env: dict[str, str], location: str, command: str) -> str | None:
+    target = target.strip()
+    if _resolved_sha(target, env):
+        return None
+    if SHELL_ENV.fullmatch(target) or ACTION_REF_EXPRESSION.fullmatch(target):
+        name = SHELL_ENV.fullmatch(target) or ACTION_REF_EXPRESSION.fullmatch(target)
+        key = name.group(1) if name else target
+        return f"{location}: {command} dependency identity {key} is undefined or not a full 40-character commit SHA"
+    if not SHA.fullmatch(target):
+        return f"{location}: {command} dependency ref {target!r} must use a full 40-character commit SHA"
+    return None
 
 
 def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
-    errors = []
-    if not re.search(r"(?m)^jobs:\s*$", text):
-        return [f"{source}: jobs mapping is required"]
-    # Validate only values that flow into dependency checkout operations, so
-    # ordinary artifact and binary digests remain outside this Git identity gate.
-    keys = dependency_identity_keys(text)
-    identity_values = _identity_values(text, keys)
-    for number, key, value in identity_values:
-        if not SHA.fullmatch(value):
-            errors.append(f"{source}:line {number}: {key} must use a full 40-character commit SHA")
-    for number, raw_value in _checkout_action_refs(text):
-        value = _yaml_scalar(raw_value)
-        if SHA.fullmatch(value):
-            continue
-        indirection = ACTION_REF_EXPRESSION.fullmatch(value)
-        if indirection and any(key == indirection.group(1) and SHA.fullmatch(identity) for _, key, identity in _identity_values(text, keys)):
-            continue
-        errors.append(f"{source}:line {number}: actions/checkout ref must be a full 40-character commit SHA or validated env identity")
-    for command, target in _git_dependency_targets(text):
-        variable = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", target)
-        if variable:
-            key = variable.group(1)
-            if not any(name == key for _, name, _ in identity_values):
-                errors.append(f"{source}: {command} dependency identity {key} must use a full 40-character commit SHA")
-        elif not SHA.fullmatch(target):
-            errors.append(f"{source}: {command} dependency ref {target!r} must use a full 40-character commit SHA")
+    document, errors = _workflow(text, source)
+    if errors or document is None:
+        return errors
     for location, ref in semantic_action_refs(text, source):
         error = validate_ref(ref, location)
         if error:
             errors.append(error)
+
+    workflow_env = _mapping(document.get("env"))
+    for job_name, raw_job in _mapping(document.get("jobs")).items():
+        job = _mapping(raw_job)
+        job_env = _mapping(job.get("env"))
+        # Reusable workflow jobs are also actions and were validated above.
+        for index, step in enumerate(_steps(job)):
+            location = f"{source}:jobs.{job_name}.steps[{index}]"
+            uses = _yaml_value(step.get("uses"))
+            if uses.startswith("actions/checkout@"):
+                checkout_with = _mapping(step.get("with"))
+                repository = _yaml_value(checkout_with.get("repository"))
+                if repository and not _yaml_value(checkout_with.get("ref")):
+                    errors.append(f"{location}: dependency checkout repository requires an immutable ref")
+                if "ref" in checkout_with:
+                    env = _effective_env(workflow_env, job_env, step.get("env"))
+                    ref = _yaml_value(checkout_with.get("ref"))
+                    if not _resolved_sha(ref, env):
+                        errors.append(f"{location}: actions/checkout ref must resolve in this scope to a full 40-character commit SHA")
+            try:
+                targets = _git_dependency_targets(_yaml_value(step.get("run")))
+            except ValueError as exc:
+                errors.append(f"{location}: ambiguous Git shell syntax: {exc}")
+                continue
+            env = _effective_env(workflow_env, job_env, step.get("env"))
+            for command, target in targets:
+                if command == "invalid":
+                    errors.append(f"{location}: unsupported or ambiguous git checkout/fetch syntax")
+                    continue
+                error = _validate_target(target, env, location, command)
+                if error:
+                    errors.append(error)
     return errors
 
 

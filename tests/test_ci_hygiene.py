@@ -172,6 +172,101 @@ jobs:
 """
         self.assertTrue(any("actions/checkout ref" in error for error in validate_workflow_text(text)))
 
+    def test_checkout_env_resolution_uses_workflow_job_and_step_scope(self):
+        workflow_visible = f"""
+env:
+  CORE_SHA: {SHA}
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@{SHA}
+        with: {{repository: owner/dependency, ref: "${{{{ env.CORE_SHA }}}}"}}
+"""
+        self.assertEqual(validate_workflow_text(workflow_visible), [])
+
+        job_visible = f"""
+jobs:
+  test:
+    env:
+      CORE_SHA: {SHA}
+    steps:
+      - uses: actions/checkout@{SHA}
+        with:
+          repository: owner/dependency
+          ref: ${{{{ env.CORE_SHA }}}}
+"""
+        self.assertEqual(validate_workflow_text(job_visible), [])
+
+        unrelated_job = f"""
+jobs:
+  job_a:
+    env:
+      CORE_SHA: {SHA}
+    steps:
+      - run: echo unrelated
+  job_b:
+    steps:
+      - uses: actions/checkout@{SHA}
+        with:
+          repository: owner/dependency
+          ref: ${{{{ env.CORE_SHA }}}}
+"""
+        self.assertTrue(any("must resolve in this scope" in error for error in validate_workflow_text(unrelated_job)))
+
+    def test_step_env_overrides_outer_identity_and_invalid_override_fails(self):
+        valid = f"""
+env:
+  CORE_SHA: {SHA}
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@{SHA}
+        env:
+          CORE_SHA: {SHA[::-1]}
+        with:
+          repository: owner/dependency
+          ref: ${{{{ env.CORE_SHA }}}}
+"""
+        self.assertEqual(validate_workflow_text(valid), [])
+        invalid = valid.replace(f"CORE_SHA: {SHA[::-1]}", "CORE_SHA: main")
+        self.assertTrue(any("must resolve in this scope" in error for error in validate_workflow_text(invalid)))
+
+    def test_flow_style_checkout_with_is_structurally_validated(self):
+        template = """
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@ACTION_SHA
+        with: {repository: owner/dependency, ref: REF}
+"""
+        self.assertTrue(validate_workflow_text(template.replace("ACTION_SHA", SHA).replace("REF", "main")))
+        self.assertTrue(validate_workflow_text(template.replace("ACTION_SHA", SHA).replace("REF", "abcdef1")))
+        self.assertEqual(validate_workflow_text(template.replace("ACTION_SHA", SHA).replace("REF", f'"{SHA}"')), [])
+        reordered = f"""
+jobs:
+  test:
+    steps:
+      - with: {{ref: main, repository: owner/dependency}}
+        uses: actions/checkout@{SHA}
+"""
+        self.assertTrue(validate_workflow_text(reordered))
+
+    def test_git_checkout_option_arity_and_orphan(self):
+        for command in (
+            f"git checkout --detach {SHA}",
+            f"git checkout {SHA}",
+            f"git checkout -B temporary {SHA}",
+            f"git checkout -b temporary {SHA}",
+            "git checkout --orphan temporary",
+        ):
+            with self.subTest(command=command):
+                text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
+                self.assertEqual(validate_workflow_text(text), [])
+        for command in ("git checkout -B temporary main", "git checkout -b temporary abcdef1", "git checkout main"):
+            with self.subTest(command=command):
+                text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
+                self.assertTrue(validate_workflow_text(text))
+
     def test_checkout_identity_discovery_covers_current_workflows(self):
         root = Path(__file__).resolve().parents[1]
         discovered: set[str] = set()

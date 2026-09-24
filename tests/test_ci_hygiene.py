@@ -267,6 +267,99 @@ jobs:
                 text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
                 self.assertTrue(validate_workflow_text(text))
 
+    def test_shell_assignments_are_tracked_in_execution_order(self):
+        cases = (
+            (f"CORE_SHA: {SHA}\n", "CORE_SHA=main\ngit checkout \"$CORE_SHA\"", False),
+            ("", f"CORE_SHA={SHA}\ngit checkout \"$CORE_SHA\"", True),
+            ("", "export CORE_SHA=main\ngit checkout \"$CORE_SHA\"", False),
+            ("", f"export CORE_SHA={SHA}\ngit checkout \"$CORE_SHA\"", True),
+            (f"CORE_SHA: {SHA}\n", "CORE_SHA=main git checkout \"$CORE_SHA\"", False),
+            ("", f"CORE_SHA={SHA} git checkout \"$CORE_SHA\"", True),
+            ("", "CORE_SHA=$(git rev-parse HEAD)\ngit checkout \"$CORE_SHA\"", False),
+            ("", "CORE_SHA=\ngit checkout \"$CORE_SHA\"", False),
+            ("", f"PINNED_SHA={SHA}\nCORE_SHA=\"$PINNED_SHA\"\ngit checkout \"$CORE_SHA\"", True),
+            ("", "PINNED_SHA=main\nCORE_SHA=\"$PINNED_SHA\"\ngit checkout \"$CORE_SHA\"", False),
+            ("", "CORE_SHA=\"${SOME_MUTABLE_VALUE}\"\ngit checkout \"$CORE_SHA\"", False),
+            ("", "CORE_SHA='${LITERAL_TEXT}'\ngit checkout \"$CORE_SHA\"", False),
+            ("", "CORE_SHA=`git rev-parse HEAD`\ngit checkout \"$CORE_SHA\"", False),
+            ("", "CORE_SHA=\"${{ vars.CORE_SHA }}\"\ngit checkout \"$CORE_SHA\"", False),
+        )
+        for env, script, expected_pass in cases:
+            with self.subTest(env=env, script=script):
+                env_yaml = env or "UNRELATED: value\n"
+                text = "jobs:\n  test:\n    env:\n" + "".join(f"      {line}" for line in env_yaml.splitlines(keepends=True))
+                text += "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                errors = validate_workflow_text(text)
+                self.assertEqual(not errors, expected_pass, errors)
+
+    def test_shell_command_local_assignments_do_not_persist(self):
+        valid_inline_only = f"""
+jobs:
+  test:
+    steps:
+      - run: |
+          CORE_SHA={SHA} git checkout "$CORE_SHA"
+"""
+        self.assertEqual(validate_workflow_text(valid_inline_only), [])
+        invalid_after_inline = f"""
+jobs:
+  test:
+    steps:
+      - run: |
+          CORE_SHA={SHA} git checkout "$CORE_SHA"
+          git checkout "$CORE_SHA"
+"""
+        self.assertTrue(validate_workflow_text(invalid_after_inline))
+
+    def test_shell_grouping_and_subshell_environment(self):
+        invalid_scripts = (
+            "(git checkout main)",
+            "(git checkout abcdef1)",
+            "(git fetch origin main)",
+            "(git checkout main; echo done)",
+            "(echo start; git checkout main)",
+            "(\n  CORE_SHA=main\n  git checkout \"$CORE_SHA\"\n)",
+            f"CORE_SHA={SHA}\n(\n  CORE_SHA=main\n  git checkout \"$CORE_SHA\"\n)",
+        )
+        for script in invalid_scripts:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertTrue(validate_workflow_text(text))
+
+        valid_scripts = (
+            f"(git checkout {SHA})",
+            f"(git fetch origin {SHA})",
+            f"(\n  git checkout {SHA}\n)",
+            f"(\n  CORE_SHA={SHA}\n  git checkout \"$CORE_SHA\"\n)",
+        )
+        for script in valid_scripts:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertEqual(validate_workflow_text(text), [])
+
+    def test_quoted_parentheses_remain_argument_data(self):
+        text = """
+jobs:
+  test:
+    steps:
+      - run: git checkout 'feature/(mutable)'
+"""
+        errors = validate_workflow_text(text)
+        self.assertTrue(any("feature/(mutable)" in error for error in errors), errors)
+
+    def test_single_quoted_shell_variable_is_literal_not_yaml_env_expansion(self):
+        text = f"""
+jobs:
+  test:
+    env:
+      CORE_SHA: {SHA}
+    steps:
+      - run: git checkout '$CORE_SHA'
+"""
+        errors = validate_workflow_text(text)
+        self.assertTrue(errors)
+        self.assertTrue(any("'$CORE_SHA'" in error for error in errors), errors)
+
     def test_checkout_identity_discovery_covers_current_workflows(self):
         root = Path(__file__).resolve().parents[1]
         discovered: set[str] = set()

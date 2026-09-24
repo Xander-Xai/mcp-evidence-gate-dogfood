@@ -288,7 +288,12 @@ def _shell_events(script: str) -> list[tuple[str, list[str]]]:
             if token == "}" and not current:
                 events.append(("brace_close", []))
                 continue
-            if token and all(char in ";&|()" for char in token):
+            if token in {";", "&&", "||", "|"}:
+                if current:
+                    events.append(("command", current))
+                    current = []
+                events.append(("operator", [token]))
+            elif token and all(char in "()" for char in token):
                 for char in token:
                     if char in "()":
                         if case_depth and char == ")":
@@ -297,10 +302,6 @@ def _shell_events(script: str) -> list[tuple[str, list[str]]]:
                             events.append(("command", current))
                             current = []
                         events.append(("open" if char == "(" else "close", []))
-                    else:
-                        if current:
-                            events.append(("command", current))
-                            current = []
             elif token and any(char in ";&|()" for char in token):
                 # shlex keeps punctuation inside a quoted word as data (for
                 # example 'feature/(mutable)'). Unquoted delimiters arrive as
@@ -438,7 +439,7 @@ def _resolve_git_invocation(tokens: list[str], inherited_env: dict[str, str] | N
     working_directory = "."
     index = 0
     control_words = {"if", "then", "elif", "else", "while", "until", "for", "do"}
-    while index < len(tokens) and (tokens[index] in control_words or tokens[index] in {"command", "exec"}):
+    while index < len(tokens) and tokens[index] in control_words:
         index += 1
     while index < len(tokens) and ASSIGNMENT.fullmatch(tokens[index]):
         match = ASSIGNMENT.fullmatch(tokens[index])
@@ -448,7 +449,32 @@ def _resolve_git_invocation(tokens: list[str], inherited_env: dict[str, str] | N
 
     while index < len(tokens):
         launcher = _literal_shell_token(tokens[index])
-        if launcher in {"command", "exec"}:
+        if launcher == "command":
+            index += 1
+            parse_options = True
+            query = False
+            while index < len(tokens) and parse_options:
+                option = _literal_shell_token(tokens[index])
+                if option is None:
+                    return GitInvocation(None, environment, "dynamic command builtin option", working_directory)
+                if option == "--":
+                    index += 1
+                    parse_options = False
+                elif option == "-p":
+                    index += 1
+                elif option in {"-v", "-V"}:
+                    query = True
+                    index += 1
+                elif option.startswith("-"):
+                    if any(_literal_shell_token(token) in {"checkout", "fetch", "clone"} for token in tokens[index + 1:]):
+                        return GitInvocation(None, environment, f"unsupported command builtin option {option!r}", working_directory)
+                    return GitInvocation(None, environment, working_directory=working_directory)
+                else:
+                    break
+            if query:
+                return GitInvocation(None, environment, working_directory=working_directory)
+            continue
+        if launcher == "exec":
             index += 1
             continue
         if launcher != "env":
@@ -799,6 +825,33 @@ def _analyze_shell_script(
     repositories = DependencyRepositoryState()
     flow_stack: list[dict[str, Any]] = []
     brace_depth = 0
+    events = _shell_events(script)
+
+    def affects_protected_state(tokens: list[str]) -> bool:
+        if any((match := ASSIGNMENT.fullmatch(token)) and match.group(1) in protected_keys for token in tokens):
+            return True
+        invocation = _resolve_git_invocation(tokens, state.env)
+        if invocation.error:
+            return True
+        index = invocation.executable_index
+        if index is None:
+            return False
+        try:
+            subcommand, _ = _git_subcommand(tokens[index:])
+        except ValueError:
+            return True
+        return subcommand in {"checkout", "fetch", "clone"}
+
+    for event_index, (event_kind, event_tokens) in enumerate(events):
+        if event_kind != "operator" or event_tokens[0] not in {"&&", "||", "|"}:
+            continue
+        previous = events[event_index - 1] if event_index else None
+        following = events[event_index + 1] if event_index + 1 < len(events) else None
+        if (previous and previous[0] == "command" and affects_protected_state(previous[1])) or (
+            following and following[0] == "command" and affects_protected_state(following[1])
+        ):
+            relation = {"&&": "short-circuit &&", "||": "short-circuit ||", "|": "pipeline"}[event_tokens[0]]
+            errors.append(f"{location}: protected Git or identity operations are unsupported in {relation} chains")
 
     def restore_environment(values: dict[str, str]) -> None:
         state.env.clear()
@@ -812,7 +865,7 @@ def _analyze_shell_script(
             merged[key] = values[0] if all(value == values[0] for value in values) else ""
         return merged
 
-    for kind, tokens in _shell_events(script):
+    for kind, tokens in events:
         if kind == "open":
             state.enter_group()
             continue
@@ -831,6 +884,8 @@ def _analyze_shell_script(
             continue
         if kind == "invalid":
             errors.append(f"{location}: unsupported or ambiguous Git shell syntax")
+            continue
+        if kind == "operator":
             continue
         if not tokens:
             continue

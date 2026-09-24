@@ -374,6 +374,73 @@ jobs:
                 text += "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in content.splitlines())
                 self.assertTrue(validate_workflow_text(text), script)
 
+    def test_command_builtin_options_are_parsed_before_the_executable(self):
+        invalid = (
+            "command -p git checkout main",
+            "command -- git checkout main",
+            "command -p -- git checkout main",
+            'command -p "/usr/bin/git" checkout main',
+            "command -p git -C repo checkout main",
+            'command "-p" git checkout main',
+            'command -p "git" checkout main',
+            'command -p "/usr/bin/git" "checkout" main',
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: " + script + "\n"
+                self.assertTrue(validate_workflow_text(text), script)
+
+        valid = (
+            f"command -p git checkout {SHA}",
+            f"command -- git checkout {SHA}",
+            f'command -p "/usr/bin/git" -C repo checkout {SHA}',
+            f"command -p env CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"exec env -i CORE_SHA={SHA} git checkout \"$CORE_SHA\"",
+            f"command -p env -C repo git checkout {SHA}",
+            "command -v git",
+            "command -V git",
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: " + script + "\n"
+                self.assertEqual(validate_workflow_text(text), [], script)
+
+        unknown = "command -x git checkout main"
+        text = "jobs:\n  test:\n    steps:\n      - run: " + unknown + "\n"
+        self.assertTrue(validate_workflow_text(text), unknown)
+
+    def test_dependency_git_operations_fail_closed_in_conditional_chains_and_pipelines(self):
+        sha_b = SHA[::-1]
+
+        def check(script):
+            text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            f"git clone repo dep\nfalse && git -C dep checkout {SHA}",
+            f"git clone repo dep\ncondition && git -C dep checkout {SHA}",
+            f"git clone repo dep\ngit -C dep checkout {SHA} && git -C dep checkout main",
+            "git clone repo dep\ntrue || git -C dep checkout " + SHA,
+            "git clone repo dep\ncondition || git -C dep checkout " + SHA,
+            f"git clone repo dep\ncondition && git -C dep checkout {sha_b}",
+            f"git clone repo dep\ncondition || git -C dep checkout {sha_b}",
+            "git clone repo dep | cat",
+            f"echo x | git -C dep checkout {SHA}",
+            f"git -C dep checkout {SHA} | cat",
+            f"git clone repo dep; false && git -C dep checkout {SHA}; git -C dep checkout \"$OTHER\"",
+            f"CORE_SHA={SHA}\ncondition && CORE_SHA=main\ngit checkout \"$CORE_SHA\"",
+            f"git clone repo dep\nfalse && command -p git -C dep checkout {SHA}",
+            f"git clone repo dep\ncondition || command -- git -C dep checkout {SHA}",
+            "{\ngit clone repo dep\ncondition && command -p git -C dep checkout " + SHA + "\n}",
+            "(\ngit clone repo dep\ncondition && command -p git -C dep checkout " + SHA + "\n)",
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                self.assertTrue(check(script), script)
+
+        valid = f"git clone repo dep; git -C dep checkout {SHA}"
+        self.assertEqual(check(valid), [])
+
         valid = (
             f"env git checkout {SHA}", f"env /usr/bin/git checkout {SHA}",
             f"env CORE_SHA={SHA} git checkout \"$CORE_SHA\"",

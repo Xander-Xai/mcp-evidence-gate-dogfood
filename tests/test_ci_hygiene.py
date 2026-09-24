@@ -311,6 +311,48 @@ jobs:
 """
         self.assertTrue(validate_workflow_text(invalid_after_inline))
 
+    def test_shell_control_clauses_and_git_executable_paths_compose(self):
+        invalid_scripts = (
+            f"if true; then CORE_SHA=main; fi\ngit checkout \"$CORE_SHA\"",
+            f"if true\nthen\nCORE_SHA=main\nfi\ngit checkout \"$CORE_SHA\"",
+            f"if CORE_SHA=main; then\ntrue\nfi\ngit checkout \"$CORE_SHA\"",
+            f"while true; do\nCORE_SHA=main\nbreak\ndone\ngit checkout \"$CORE_SHA\"",
+            f"for x in 1; do CORE_SHA=main; done\ngit checkout \"$CORE_SHA\"",
+            f"until false; do CORE_SHA=main; break; done\ngit checkout \"$CORE_SHA\"",
+            f"if true; then export CORE_SHA=main; fi\ngit checkout \"$CORE_SHA\"",
+            f"if true; then CORE_SHA=main; fi\n/usr/bin/git checkout \"$CORE_SHA\"",
+            f"CORE_SHA={SHA}\n(\nif true; then CORE_SHA=main; fi\n/usr/bin/git checkout \"$CORE_SHA\"\n)",
+            "ignored=$(git checkout main)",
+            f"ignored=$(git checkout {SHA})",
+            "ignored=$(/usr/bin/git fetch origin main)",
+            "ignored=`git checkout main`",
+            f"ignored=$(/usr/bin/git -C repo checkout main)",
+            "if true; then\nignored=$(git -C repo checkout main)\nfi",
+            "/usr/bin/git checkout main",
+            "/usr/bin/git checkout abcdef1",
+            "/usr/bin/git -C repo checkout main",
+            "/usr/local/bin/git fetch origin main",
+            "./git checkout main",
+        )
+        for script in invalid_scripts:
+            with self.subTest(script=script):
+                env = "CORE_SHA: " + SHA + "\n" if "CORE_SHA:" not in script else ""
+                text = "jobs:\n  test:\n    env:\n" + "".join(f"      {line}\n" for line in env.splitlines())
+                text += "    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertTrue(validate_workflow_text(text), script)
+
+        valid_scripts = (
+            f"if true; then CORE_SHA={SHA}; fi\ngit checkout \"$CORE_SHA\"",
+            f"/usr/bin/git checkout {SHA}",
+            f"/usr/bin/git -C repo checkout {SHA}",
+            f"/usr/bin/git fetch origin {SHA}",
+            f"CORE_SHA={SHA}\n(\n/usr/bin/git checkout \"$CORE_SHA\"\n)",
+        )
+        for script in valid_scripts:
+            with self.subTest(script=script):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+                self.assertEqual(validate_workflow_text(text), [], script)
+
     def test_shell_grouping_and_subshell_environment(self):
         invalid_scripts = (
             "(git checkout main)",

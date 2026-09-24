@@ -188,7 +188,7 @@ def _mask_command_substitutions(line: str) -> tuple[str, bool]:
                 substitution_end = end
                 inner = line[index + 2:end - 1]
         if substitution_end is not None:
-            if re.search(r"\bgit\s+(checkout|fetch)\b", inner):
+            if _contains_git_dependency_operation(inner):
                 found_unsafe_git = True
             output.append("__CODEX_DYNAMIC_SUBSTITUTION__")
             index = substitution_end
@@ -236,7 +236,7 @@ def _shell_events(script: str) -> list[tuple[str, list[str]]]:
             # Shell blocks routinely contain multiline quoting and template
             # syntax unrelated to Git. Only fail closed when the malformed
             # line itself appears to contain a protected Git operation.
-            if re.search(r"\bgit\s+(checkout|fetch)\b", script):
+            if re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch)\b", script):
                 events.append(("invalid", ["git", "__ambiguous_git_checkout_fetch__"]))
             continue
         for token in tokens:
@@ -265,7 +265,7 @@ def _shell_events(script: str) -> list[tuple[str, list[str]]]:
             heredoc_match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
             if heredoc_match:
                 heredoc = heredoc_match.group(1)
-    if pending and re.search(r"\bgit\b.*\b(checkout|fetch)\b", pending):
+    if pending and re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch)\b", pending):
         events.append(("invalid", ["git", "__ambiguous_git_checkout_fetch__"]))
     return events
 
@@ -300,6 +300,32 @@ def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
             raise ValueError(f"unsupported git global option {token!r}")
         return None, index
     return None, index
+
+
+def _is_git_executable(token: str) -> bool:
+    """Recognize Git by executable basename, including explicit paths."""
+    return token.replace("\\", "/").rsplit("/", 1)[-1] == "git"
+
+
+def _git_executable_index(tokens: list[str]) -> int | None:
+    return next((index for index, token in enumerate(tokens) if _is_git_executable(token)), None)
+
+
+def _contains_git_dependency_operation(script: str) -> bool:
+    """Use the normal shell and Git parsers for nested substitution content."""
+    for tokens in _shell_commands(script):
+        index = _git_executable_index(tokens)
+        if index is None:
+            continue
+        try:
+            subcommand, _ = _git_subcommand(tokens[index:])
+        except ValueError:
+            if any(token in {"checkout", "fetch"} for token in tokens[index + 1:]):
+                return True
+            continue
+        if subcommand in {"checkout", "fetch"}:
+            return True
+    return False
 
 
 def _checkout_target(args: list[str]) -> str | None:
@@ -389,9 +415,8 @@ def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
         if "__ambiguous_git_checkout_fetch__" in command_tokens:
             targets.append(("invalid", ""))
             continue
-        try:
-            git_index = command_tokens.index("git")
-        except ValueError:
+        git_index = _git_executable_index(command_tokens)
+        if git_index is None:
             continue
         try:
             subcommand, args_index = _git_subcommand(command_tokens[git_index:])
@@ -403,7 +428,7 @@ def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
                 targets.extend((subcommand, target) for target in _fetch_targets(command_tokens[git_index + args_index:]))
         except ValueError:
             # A malformed git checkout/fetch line is not silently ignored.
-            if re.search(r"\bgit\b.*\b(checkout|fetch)\b", " ".join(command_tokens)):
+            if re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch)\b", " ".join(command_tokens)):
                 targets.append(("invalid", ""))
     return targets
 
@@ -455,6 +480,13 @@ def _analyze_shell_script(
         # Commands that can mutate arbitrary shell state are outside the
         # supported static grammar. If protected names are in scope, fail
         # closed rather than carrying forward a possibly stale SHA.
+        control_words = {"if", "then", "elif", "else", "while", "until", "for", "do"}
+        command_offset = 0
+        while command_offset < len(tokens) and tokens[command_offset] in control_words:
+            command_offset += 1
+        if command_offset == len(tokens):
+            continue
+        tokens = tokens[command_offset:]
         command_name = tokens[0]
         source_is_venv_activation = (
             command_name == "source"
@@ -510,9 +542,8 @@ def _analyze_shell_script(
             command_env = state.env
             command_tokens = tokens
 
-        try:
-            git_index = command_tokens.index("git")
-        except ValueError:
+        git_index = _git_executable_index(command_tokens)
+        if git_index is None:
             # Unknown declarations of protected values are not accepted.
             if command_name in {"declare", "typeset", "local", "readonly"}:
                 for token in tokens[1:]:

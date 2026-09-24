@@ -1,114 +1,1195 @@
 #!/usr/bin/env python3
-"""Fail-closed semantic GitHub Actions pin validation using only stdlib."""
+"""Fail-closed GitHub Actions pin validation with structural YAML analysis.
+
+Dependency refs are checked in their workflow/job/step environment scope.
+Shell parsing is intentionally bounded to Git checkout/fetch/clone forms
+documented in their parsers, simple branch/loop state merges, and command/exec
+plus a small env-launcher subset. Dynamic or unsupported
+dependency command syntax fails closed.
+"""
 
 from __future__ import annotations
 
+import posixpath
 import re
+import shlex
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 EXTERNAL = re.compile(r"^[^/@\s]+/[^@\s]+@(.+)$")
+ACTION_REF_EXPRESSION = re.compile(r"^\$\{\{\s*env\.([A-Z][A-Z0-9_]*)\s*\}\}$")
+SHELL_ENV = re.compile(r"^\$\{?([A-Z][A-Z0-9_]*)\}?$")
 
 
-def _value(raw: str) -> str:
-    value = raw.split(" #", 1)[0].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        value = value[1:-1]
-    return value
+def _yaml_value(value: Any) -> str:
+    """Convert a YAML scalar to text without discarding quotes' content."""
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _shell_word(token: str) -> tuple[str, bool]:
+    """Unquote one shell word and report whether variable expansion applies."""
+    token = token.strip()
+    if len(token) >= 2 and token[0] == token[-1] == "'":
+        return token[1:-1], False
+    if len(token) >= 2 and token[0] == token[-1] == '"':
+        return token[1:-1], True
+    return token, True
+
+
+def _canonical_shell_path(token: str, env: dict[str, str]) -> str | None:
+    """Normalize a bounded path word, retaining unresolved variable identity."""
+    value, expandable = _shell_word(token)
+    if "__CODEX_DYNAMIC_SUBSTITUTION__" in value or "`" in value:
+        return None
+    if not expandable:
+        return posixpath.normpath(value)
+
+    def replace_variable(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        resolved = env.get(name)
+        if resolved and not any(char in resolved for char in "$`\n"):
+            return resolved
+        return f"@{name}@"
+
+    value = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", replace_variable, value)
+    if "$" in value or "`" in value or "\n" in value:
+        return None
+    return posixpath.normpath(value)
+
+
+def _join_shell_paths(base: str, path: str) -> str:
+    """Join POSIX-style paths while respecting absolute destinations."""
+    return posixpath.normpath(path if posixpath.isabs(path) else posixpath.join(base, path))
+
+
+def _external_action_parts(value: str) -> tuple[str, str] | None:
+    """Parse an external action into its original repository identity and ref."""
+    match = EXTERNAL.fullmatch(value.strip())
+    if not match:
+        return None
+    ref = match.group(1)
+    return value.strip()[:-(len(ref) + 1)], ref
 
 
 def validate_ref(ref: str, location: str) -> str | None:
-    ref = _value(ref)
+    ref = ref.strip()
     if ref.startswith("./") or ref.startswith("../"):
         return None
     if ref.startswith("docker://"):
         return f"{location}: docker references are unsupported"
-    match = EXTERNAL.fullmatch(ref)
-    if not match or not SHA.fullmatch(match.group(1)):
+    parts = _external_action_parts(ref)
+    if not parts or not SHA.fullmatch(parts[1]):
         return f"{location}: external Action must use a full 40-character commit SHA"
     return None
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _workflow(text: str, source: str) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return None, [f"{source}: invalid workflow YAML: {exc}"]
+    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+        return None, [f"{source}: jobs mapping is required"]
+    return document, []
+
+
+def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = job.get("steps", [])
+    if not isinstance(steps, list):
+        return []
+    return [_mapping(step) for step in steps]
+
+
+def _effective_env(*scopes: Any) -> dict[str, str]:
+    """Merge outer-to-inner workflow, job, and step env mappings."""
+    effective: dict[str, str] = {}
+    for scope in scopes:
+        for key, value in _mapping(scope).items():
+            effective[str(key)] = _yaml_value(value)
+    return effective
+
+
+def _resolved_sha(value: str, env: dict[str, str]) -> bool:
+    value = value.strip()
+    if SHA.fullmatch(value):
+        return True
+    match = ACTION_REF_EXPRESSION.fullmatch(value)
+    if match:
+        return bool(SHA.fullmatch(env.get(match.group(1), "")))
+    shell_match = SHELL_ENV.fullmatch(value)
+    if shell_match:
+        return bool(SHA.fullmatch(env.get(shell_match.group(1), "")))
+    return False
+
+
+@dataclass
+class ShellState:
+    """Bounded static shell environment and subshell scope stack."""
+
+    persistent_env: dict[str, str]
+    scopes: list[dict[str, str]] = field(default_factory=list)
+
+    @property
+    def env(self) -> dict[str, str]:
+        return self.scopes[-1] if self.scopes else self.persistent_env
+
+    def enter_group(self) -> None:
+        self.scopes.append(self.env.copy())
+
+    def leave_group(self) -> bool:
+        if not self.scopes:
+            return False
+        self.scopes.pop()
+        return True
+
+
+def _mask_command_substitutions(line: str) -> tuple[str, bool]:
+    """Mask command substitutions, flagging nested protected Git operations."""
+    output: list[str] = []
+    index = 0
+    quote: str | None = None
+    escaped = False
+    found_unsafe_git = False
+    while index < len(line):
+        char = line[index]
+        if escaped:
+            output.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and quote != "'":
+            output.append(char)
+            escaped = True
+            index += 1
+            continue
+        if char in "'\"":
+            if quote == char:
+                quote = None
+            elif quote is None:
+                quote = char
+            output.append(char)
+            index += 1
+            continue
+        substitution_end: int | None = None
+        if char == "`" and quote != "'":
+            end = index + 1
+            while end < len(line) and line[end] != "`":
+                if line[end] == "\\":
+                    end += 1
+                end += 1
+            if end < len(line):
+                substitution_end = end + 1
+                inner = line[index + 1:end]
+            else:
+                found_unsafe_git = True
+                substitution_end = len(line)
+                inner = line[index + 1:]
+        elif line.startswith("$(", index) and quote != "'":
+            depth = 1
+            end = index + 2
+            inner_quote: str | None = None
+            inner_escaped = False
+            while end < len(line) and depth:
+                current = line[end]
+                if inner_escaped:
+                    inner_escaped = False
+                elif current == "\\" and inner_quote != "'":
+                    inner_escaped = True
+                elif inner_quote:
+                    if current == inner_quote:
+                        inner_quote = None
+                elif current in "'\"":
+                    inner_quote = current
+                elif current == "(":
+                    depth += 1
+                elif current == ")":
+                    depth -= 1
+                end += 1
+            if depth:
+                found_unsafe_git = True
+                substitution_end = len(line)
+                inner = line[index + 2:]
+            else:
+                substitution_end = end
+                inner = line[index + 2:end - 1]
+        if substitution_end is not None:
+            if _contains_git_dependency_operation(inner):
+                found_unsafe_git = True
+            output.append("__CODEX_DYNAMIC_SUBSTITUTION__")
+            index = substitution_end
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output), found_unsafe_git
+
+
+def _shell_events(script: str) -> list[tuple[str, list[str]]]:
+    """Return shell commands and explicit group events from a bounded lexer.
+
+    Newlines, ``;``, ``&&``, ``||``, and pipes end commands. Unquoted
+    parentheses are subshell delimiters. Standalone reserved-word braces are
+    current-shell group delimiters; braces inside variable/template words are
+    left intact because they are not lexer punctuation.
+    """
+    events: list[tuple[str, list[str]]] = []
+    pending = ""
+    heredoc: str | None = None
+    case_depth = 0
+    for raw_line in script.splitlines():
+        if heredoc is not None:
+            if raw_line.strip() == heredoc:
+                heredoc = None
+            continue
+        line = pending + raw_line.strip()
+        if re.match(r"^case\s", line):
+            case_depth += 1
+        elif line == "esac" and case_depth:
+            case_depth -= 1
+        if line.endswith("\\"):
+            pending = line[:-1] + " "
+            continue
+        pending = ""
+        line, unsafe_substitution = _mask_command_substitutions(line)
+        if unsafe_substitution:
+            events.append(("invalid", ["git", "__ambiguous_git_checkout_fetch__"]))
+        lexer = shlex.shlex(line, posix=False, punctuation_chars=";&|()")
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        current: list[str] = []
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            # Shell blocks routinely contain multiline quoting and template
+            # syntax unrelated to Git. Only fail closed when the malformed
+            # line itself appears to contain a protected Git operation.
+            if re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch|clone)\b", script):
+                events.append(("invalid", ["git", "__ambiguous_git_checkout_fetch__"]))
+            continue
+        for token in tokens:
+            if token == "{" and (not current or current == ["then"] or current == ["else"] or current == ["do"]):
+                if current:
+                    events.append(("command", current))
+                    current = []
+                events.append(("brace_open", []))
+                continue
+            if token == "}" and not current:
+                events.append(("brace_close", []))
+                continue
+            if token in {";", "&&", "||", "|"}:
+                if current:
+                    events.append(("command", current))
+                    current = []
+                events.append(("operator", [token]))
+            elif token and all(char in "()" for char in token):
+                for char in token:
+                    if char in "()":
+                        if case_depth and char == ")":
+                            continue
+                        if current:
+                            events.append(("command", current))
+                            current = []
+                        events.append(("open" if char == "(" else "close", []))
+            elif token and any(char in ";&|()" for char in token):
+                # shlex keeps punctuation inside a quoted word as data (for
+                # example 'feature/(mutable)'). Unquoted delimiters arrive as
+                # punctuation-only tokens and are handled above.
+                current.append(token)
+            else:
+                current.append(token)
+        if current:
+            events.append(("command", current))
+            heredoc_match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
+            if heredoc_match:
+                heredoc = heredoc_match.group(1)
+    if pending and re.search(r"(?:^|\s)(?:[^\s;&|()]*/)?git\b.*\b(checkout|fetch|clone)\b", pending):
+        events.append(("invalid", ["git", "__ambiguous_git_checkout_fetch__"]))
+    return events
+
+
+def _shell_commands(script: str) -> list[list[str]]:
+    """Compatibility projection of parsed commands, including grouped ones."""
+    return [tokens for kind, tokens in _shell_events(script) if kind in {"command", "invalid"}]
+
+
+def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
+    """Locate supported dependency commands after supported Git global options."""
+    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    index = 1
+    while index < len(tokens):
+        token = _literal_shell_token(tokens[index])
+        if token is None:
+            raise ValueError("dynamic Git subcommand or global option")
+        if token in {"checkout", "fetch", "clone"}:
+            return token, index + 1
+        if token in value_options:
+            if index + 1 >= len(tokens):
+                raise ValueError(f"git {token} requires an argument")
+            index += 2
+            continue
+        if token.startswith(("-C", "-c", "--git-dir=", "--work-tree=", "--namespace=", "--config-env=")):
+            index += 1
+            continue
+        if token.startswith("-"):
+            # Support ordinary no-argument global switches, but do not guess
+            # at unfamiliar options that may consume the following operand.
+            if token in {"--no-pager", "--no-optional-locks", "--bare", "--literal-pathspecs"}:
+                index += 1
+                continue
+            raise ValueError(f"unsupported git global option {token!r}")
+        return None, index
+    return None, index
+
+
+def _git_working_directory(tokens: list[str], env: dict[str, str]) -> tuple[str | None, int]:
+    """Return the bounded effective cwd from leading Git ``-C`` options."""
+    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    cwd: str | None = "."
+    index = 1
+    while index < len(tokens):
+        option = _literal_shell_token(tokens[index])
+        if option is None:
+            raise ValueError("dynamic Git global option")
+        if option in value_options:
+            if index + 1 >= len(tokens):
+                raise ValueError(f"git {option} requires an argument")
+            if option == "-C" and cwd is not None:
+                path = _canonical_shell_path(tokens[index + 1], env)
+                if path is None:
+                    raise ValueError("dynamic Git -C path")
+                cwd = _join_shell_paths(cwd, path)
+            elif option in {"--git-dir", "--work-tree"}:
+                cwd = None
+            index += 2
+            continue
+        if option.startswith("-C") and option != "-C":
+            if cwd is not None:
+                path = _canonical_shell_path(option[2:], env)
+                if path is None:
+                    raise ValueError("dynamic Git -C path")
+                cwd = _join_shell_paths(cwd, path)
+            index += 1
+            continue
+        if option.startswith(("--git-dir=", "--work-tree=")):
+            cwd = None
+            index += 1
+            continue
+        if option.startswith(("-c", "--namespace=", "--config-env=")):
+            index += 1
+            continue
+        if option in {"--no-pager", "--no-optional-locks", "--literal-pathspecs"}:
+            index += 1
+            continue
+        if option in {"--bare", "--mirror"}:
+            cwd = None
+            index += 1
+            continue
+        break
+    return cwd, index
+
+
+def _is_git_executable(token: str) -> bool:
+    """Recognize Git by executable basename, including explicit paths."""
+    word = _literal_shell_token(token)
+    if word is None:
+        return False
+    return word.replace("\\", "/").rsplit("/", 1)[-1] == "git"
+
+
+def _is_dynamic_executable(token: str) -> bool:
+    return _literal_shell_token(token) is None
+
+
+def _literal_shell_token(token: str) -> str | None:
+    """Decode a statically literal shell word, returning None for expansion."""
+    word, expandable = _shell_word(token)
+    if expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word):
+        return None
+    return word
+
+
+def _git_executable_index(tokens: list[str]) -> int | None:
+    """Compatibility helper for finding a command-position Git invocation."""
+    return _resolve_git_invocation(tokens).executable_index
+
+
+@dataclass
+class GitInvocation:
+    executable_index: int | None
+    environment: dict[str, str]
+    error: str | None = None
+    working_directory: str = "."
+
+
+def _resolve_git_invocation(tokens: list[str], inherited_env: dict[str, str] | None = None) -> GitInvocation:
+    """Resolve shell prefixes and bounded env launchers before locating Git."""
+    environment = dict(inherited_env or {})
+    working_directory = "."
+    index = 0
+    control_words = {"if", "then", "elif", "else", "while", "until", "for", "do"}
+    while index < len(tokens) and tokens[index] in control_words:
+        index += 1
+    while index < len(tokens) and ASSIGNMENT.fullmatch(tokens[index]):
+        match = ASSIGNMENT.fullmatch(tokens[index])
+        assert match is not None
+        environment[match.group(1)] = _assignment_value(match.group(2), environment)
+        index += 1
+
+    while index < len(tokens):
+        launcher = _literal_shell_token(tokens[index])
+        if launcher == "command":
+            index += 1
+            parse_options = True
+            query = False
+            while index < len(tokens) and parse_options:
+                option = _literal_shell_token(tokens[index])
+                if option is None:
+                    return GitInvocation(None, environment, "dynamic command builtin option", working_directory)
+                if option == "--":
+                    index += 1
+                    parse_options = False
+                elif option == "-p":
+                    index += 1
+                elif option in {"-v", "-V"}:
+                    query = True
+                    index += 1
+                elif option.startswith("-"):
+                    if any(_literal_shell_token(token) in {"checkout", "fetch", "clone"} for token in tokens[index + 1:]):
+                        return GitInvocation(None, environment, f"unsupported command builtin option {option!r}", working_directory)
+                    return GitInvocation(None, environment, working_directory=working_directory)
+                else:
+                    break
+            if query:
+                return GitInvocation(None, environment, working_directory=working_directory)
+            continue
+        if launcher == "exec":
+            index += 1
+            continue
+        if launcher != "env":
+            break
+        index += 1
+        parse_options = True
+        while index < len(tokens):
+            option = _literal_shell_token(tokens[index])
+            if option is None:
+                return GitInvocation(None, environment, "dynamic env option", working_directory)
+            if parse_options and option == "--":
+                index += 1
+                parse_options = False
+                continue
+            if parse_options and option in {"-i", "--ignore-environment"}:
+                environment.clear()
+                index += 1
+                continue
+            if parse_options and option in {"-u", "--unset"}:
+                if index + 1 >= len(tokens):
+                    return GitInvocation(None, environment, f"env {option} requires a variable name", working_directory)
+                name = _literal_shell_token(tokens[index + 1])
+                if name is None:
+                    return GitInvocation(None, environment, "dynamic env unset name", working_directory)
+                environment.pop(name, None)
+                index += 2
+                continue
+            if parse_options and option in {"-C", "--chdir"}:
+                if index + 1 >= len(tokens):
+                    return GitInvocation(None, environment, f"env {option} requires a directory", working_directory)
+                path = _canonical_shell_path(tokens[index + 1], environment)
+                if path is None:
+                    return GitInvocation(None, environment, f"dynamic env {option} directory", working_directory)
+                working_directory = _join_shell_paths(working_directory, path)
+                index += 2
+                continue
+            if parse_options and option.startswith("--unset="):
+                environment.pop(option.split("=", 1)[1], None)
+                index += 1
+                continue
+            if parse_options and option.startswith("--chdir="):
+                path = _canonical_shell_path(option.split("=", 1)[1], environment)
+                if path is None:
+                    return GitInvocation(None, environment, "dynamic env --chdir directory", working_directory)
+                working_directory = _join_shell_paths(working_directory, path)
+                index += 1
+                continue
+            if parse_options and option.startswith("-C") and option != "-C":
+                path = _canonical_shell_path(option[2:], environment)
+                if path is None:
+                    return GitInvocation(None, environment, "dynamic env -C directory", working_directory)
+                working_directory = _join_shell_paths(working_directory, path)
+                index += 1
+                continue
+            if parse_options and option.startswith("-"):
+                return GitInvocation(None, environment, f"unsupported env option {option!r}", working_directory)
+            match = ASSIGNMENT.fullmatch(option)
+            if match:
+                environment[match.group(1)] = _assignment_value(match.group(2), environment)
+                index += 1
+                continue
+            break
+
+    if index < len(tokens) and (_is_git_executable(tokens[index]) or _is_dynamic_executable(tokens[index])):
+        return GitInvocation(index, environment, working_directory=working_directory)
+    return GitInvocation(None, environment, working_directory=working_directory)
+
+
+def _contains_git_dependency_operation(script: str) -> bool:
+    """Use the normal shell and Git parsers for nested substitution content."""
+    for tokens in _shell_commands(script):
+        invocation = _resolve_git_invocation(tokens)
+        if invocation.error:
+            return True
+        index = invocation.executable_index
+        if index is None:
+            continue
+        if _is_dynamic_executable(tokens[index]):
+            if any(token in {"checkout", "fetch"} for token in tokens[index + 1:]):
+                return True
+            continue
+        try:
+            subcommand, _ = _git_subcommand(tokens[index:])
+        except ValueError:
+            return True
+        if subcommand in {"checkout", "fetch", "clone"}:
+            return True
+    return False
+
+
+def _checkout_target(args: list[str]) -> str:
+    """Return checkout's revision operand; support -b/-B and --orphan arity.
+
+    Supported options: --detach, -b/--branch, -B, --orphan, --force/-f,
+    --quiet/-q, --guess/--no-guess, --overlay/--no-overlay,
+    --recurse-submodules[=<pathspec>], and --no-recurse-submodules. Unknown
+    or malformed options fail closed. ``--`` ends options; pathspec checkout
+    (two positional operands) is rejected as ambiguous for dependency pinning.
+    """
+    index = 0
+    positional: list[str] = []
+    branch_option = False
+    while index < len(args):
+        raw_token = args[index]
+        token = _literal_shell_token(raw_token)
+        if token is None:
+            # A dynamic positional revision is retained for scope-aware SHA
+            # resolution; a dynamic option cannot be parsed safely.
+            if raw_token.startswith("-"):
+                raise ValueError("dynamic git checkout option")
+            positional.append(raw_token)
+            index += 1
+            continue
+        if token == "--":
+            positional.extend(args[index + 1:])
+            break
+        if token in {"-b", "-B", "--branch", "--orphan"}:
+            if index + 1 >= len(args):
+                raise ValueError(f"{token} requires a branch name")
+            if token != "--orphan":
+                branch_option = True
+            index += 2
+            continue
+        if token.startswith("--branch="):
+            branch_option = True
+            index += 1
+            continue
+        if token.startswith("--orphan="):
+            index += 1
+            continue
+        if token in {"--detach", "-d", "--force", "-f", "--quiet", "-q", "--guess", "--no-guess", "--overlay", "--no-overlay", "--no-recurse-submodules"}:
+            index += 1
+            continue
+        if token == "--recurse-submodules":
+            index += 1
+            if index < len(args) and not args[index].startswith("-"):
+                # This option's optional pathspec is only consumed when
+                # explicitly attached by Git; a separate token is a ref.
+                pass
+            continue
+        if token.startswith("--recurse-submodules="):
+            index += 1
+            continue
+        if token.startswith("-"):
+            raise ValueError(f"unsupported git checkout option {token!r}")
+        positional.append(raw_token)
+        index += 1
+    if branch_option:
+        if len(positional) != 1:
+            raise ValueError("git checkout -b/-B requires exactly one start-point revision")
+        return positional[0]
+    if len(positional) > 1:
+        raise ValueError("ambiguous git checkout with multiple positional operands")
+    if not positional:
+        raise ValueError("git checkout requires an explicit revision")
+    return positional[0]
+
+
+def _fetch_targets(args: list[str]) -> list[str]:
+    """Parse bounded ``git fetch [options] remote [refspec ...]`` syntax."""
+    value_options = {"--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--filter", "--server-option", "-j"}
+    index = 0
+    while index < len(args):
+        token = _literal_shell_token(args[index])
+        if token is None:
+            raise ValueError("dynamic git fetch option or refspec")
+        if token == "--":
+            index += 1
+            break
+        if token in value_options:
+            if index + 1 >= len(args):
+                raise ValueError(f"git fetch {token} requires an argument")
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    if index >= len(args):
+        return []
+    return [token for token in args[index + 1:] if not token.startswith("-")]
+
+
+def _clone_destination(args: list[str], env: dict[str, str], cwd: str) -> str:
+    """Parse bounded clone options and return its explicit destination path."""
+    value_options = {
+        "-b", "--branch", "-o", "--origin", "-c", "--config", "--depth",
+        "--shallow-since", "--shallow-exclude", "--filter", "--separate-git-dir",
+        "--reference", "--reference-if-able", "--upload-pack", "-j", "--jobs",
+    }
+    no_value_options = {
+        "--no-checkout", "-n", "--single-branch", "--no-tags",
+        "--recurse-submodules", "--shallow-submodules", "--reject-shallow", "--sparse",
+        "--quiet", "-q", "--progress", "--verbose", "-v",
+    }
+    positionals: list[str] = []
+    index = 0
+    parse_options = True
+    while index < len(args):
+        raw = args[index]
+        if raw.startswith((">", "<")) or re.fullmatch(r"\d+[<>].*", raw):
+            break
+        option = _literal_shell_token(raw)
+        if option is None:
+            if raw.startswith("-"):
+                raise ValueError("dynamic git clone option")
+            positionals.append(raw)
+            index += 1
+            continue
+        if parse_options and option == "--":
+            parse_options = False
+            index += 1
+            continue
+        if parse_options and option in no_value_options:
+            index += 1
+            continue
+        if parse_options and option in value_options:
+            if index + 1 >= len(args):
+                raise ValueError(f"git clone {option} requires an argument")
+            index += 2
+            continue
+        if parse_options and option.startswith(("--branch=", "--origin=", "--config=", "--depth=", "--filter=", "--reference=", "--reference-if-able=", "--upload-pack=", "--jobs=")):
+            index += 1
+            continue
+        if parse_options and option.startswith("-"):
+            raise ValueError(f"unsupported git clone option {option!r}")
+        positionals.append(raw)
+        index += 1
+
+    # Do not infer Git's default directory from a URL: spelling and local
+    # paths make a guess unsafe for repository matching.
+    if len(positionals) != 2:
+        raise ValueError("git clone requires repository and explicit destination")
+    destination = _canonical_shell_path(positionals[1], env)
+    if destination is None:
+        raise ValueError("dynamic git clone destination")
+    return _join_shell_paths(cwd, destination)
+
+
+@dataclass
+class DependencyRepositoryState:
+    """Filesystem checkout state, separate from shell environment scope."""
+
+    checkouts: dict[str, str | None] = field(default_factory=dict)
+
+    def clone(self, path: str) -> None:
+        self.checkouts[path] = None
+
+    def pin(self, path: str, sha: str) -> None:
+        if path in self.checkouts:
+            self.checkouts[path] = sha
+
+    def merge(self, outcomes: list[dict[str, str | None]]) -> None:
+        keys = set().union(*(outcome.keys() for outcome in outcomes))
+        merged: dict[str, str | None] = {}
+        for path in keys:
+            values = [outcome[path] for outcome in outcomes if path in outcome]
+            if values and values[0] is not None and all(value == values[0] for value in values):
+                merged[path] = values[0]
+            elif values:
+                merged[path] = None
+        self.checkouts = merged
+
+
+def _resolved_sha_value(value: str, env: dict[str, str]) -> str | None:
+    """Return a known selected SHA for a literal or simple shell variable."""
+    word, expandable = _shell_word(value)
+    if SHA.fullmatch(word):
+        return word
+    if not expandable:
+        return None
+    reference = SHELL_ENV.fullmatch(word)
+    if not reference:
+        return None
+    resolved = env.get(reference.group(1), "")
+    return resolved if SHA.fullmatch(resolved) else None
+
+
+def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
+    """Extract bounded Git checkout/fetch/clone operations from a shell script."""
+    targets: list[tuple[str, str]] = []
+    for command_tokens in _shell_commands(script):
+        if "__ambiguous_git_checkout_fetch__" in command_tokens:
+            targets.append(("invalid", ""))
+            continue
+        invocation = _resolve_git_invocation(command_tokens)
+        if invocation.error:
+            targets.append(("invalid", ""))
+            continue
+        git_index = invocation.executable_index
+        if git_index is None:
+            continue
+        try:
+            subcommand, args_index = _git_subcommand(command_tokens[git_index:])
+            if _is_dynamic_executable(command_tokens[git_index]):
+                if subcommand in {"checkout", "fetch", "clone"}:
+                    targets.append(("invalid", ""))
+                continue
+            if subcommand == "checkout":
+                target = _checkout_target(command_tokens[git_index + args_index:])
+                targets.append((subcommand, target))
+            elif subcommand == "fetch":
+                targets.extend((subcommand, target) for target in _fetch_targets(command_tokens[git_index + args_index:]))
+            elif subcommand == "clone":
+                git_tokens = command_tokens[git_index:]
+                cwd, _ = _git_working_directory(git_tokens, invocation.environment)
+                if cwd is None:
+                    raise ValueError("ambiguous Git clone location")
+                cwd = _join_shell_paths(invocation.working_directory, cwd)
+                target = _clone_destination(git_tokens[args_index:], invocation.environment, cwd)
+                targets.append((subcommand, target))
+        except ValueError:
+            # A malformed Git dependency line is not silently ignored.
+            targets.append(("invalid", ""))
+    return targets
+
+
+ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+VARIABLE_VALUE = re.compile(r"^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$")
+
+
+def _assignment_value(value: str, env: dict[str, str]) -> str:
+    """Resolve literal SHA or a simple already-resolved variable reference."""
+    value, expandable = _shell_word(value)
+    if SHA.fullmatch(value):
+        return value
+    if not expandable:
+        return value
+    reference = VARIABLE_VALUE.fullmatch(value)
+    if reference:
+        resolved = env.get(reference.group(1), "")
+        return resolved if SHA.fullmatch(resolved) else value
+    # Retain all other values as explicitly non-SHA so they shadow YAML env.
+    # This covers mutable refs, empty assignments, expressions, substitutions,
+    # and any complex value the bounded analyzer cannot safely evaluate.
+    return value
+
+
+def _analyze_shell_script(
+    script: str,
+    initial_env: dict[str, str],
+    location: str,
+    protected_keys: set[str],
+) -> list[str]:
+    """Validate Git refs while applying simple shell assignments in order."""
+    errors: list[str] = []
+    state = ShellState(initial_env.copy())
+    repositories = DependencyRepositoryState()
+    flow_stack: list[dict[str, Any]] = []
+    brace_depth = 0
+    events = _shell_events(script)
+
+    def affects_protected_state(tokens: list[str]) -> bool:
+        if any((match := ASSIGNMENT.fullmatch(token)) and match.group(1) in protected_keys for token in tokens):
+            return True
+        invocation = _resolve_git_invocation(tokens, state.env)
+        if invocation.error:
+            return True
+        index = invocation.executable_index
+        if index is None:
+            return False
+        try:
+            subcommand, _ = _git_subcommand(tokens[index:])
+        except ValueError:
+            return True
+        return subcommand in {"checkout", "fetch", "clone"}
+
+    for event_index, (event_kind, event_tokens) in enumerate(events):
+        if event_kind != "operator" or event_tokens[0] not in {"&&", "||", "|"}:
+            continue
+        previous = events[event_index - 1] if event_index else None
+        following = events[event_index + 1] if event_index + 1 < len(events) else None
+        if (previous and previous[0] == "command" and affects_protected_state(previous[1])) or (
+            following and following[0] == "command" and affects_protected_state(following[1])
+        ):
+            relation = {"&&": "short-circuit &&", "||": "short-circuit ||", "|": "pipeline"}[event_tokens[0]]
+            errors.append(f"{location}: protected Git or identity operations are unsupported in {relation} chains")
+
+    def restore_environment(values: dict[str, str]) -> None:
+        state.env.clear()
+        state.env.update(values)
+
+    def merge_environments(outcomes: list[dict[str, str]]) -> dict[str, str]:
+        keys = set().union(*(outcome.keys() for outcome in outcomes))
+        merged: dict[str, str] = {}
+        for key in keys:
+            values = [outcome.get(key, "") for outcome in outcomes]
+            merged[key] = values[0] if all(value == values[0] for value in values) else ""
+        return merged
+
+    for kind, tokens in events:
+        if kind == "open":
+            state.enter_group()
+            continue
+        if kind == "close":
+            if not state.leave_group():
+                errors.append(f"{location}: unmatched shell group close")
+            continue
+        if kind == "brace_open":
+            brace_depth += 1
+            continue
+        if kind == "brace_close":
+            if not brace_depth:
+                errors.append(f"{location}: unmatched shell brace-group close")
+            else:
+                brace_depth -= 1
+            continue
+        if kind == "invalid":
+            errors.append(f"{location}: unsupported or ambiguous Git shell syntax")
+            continue
+        if kind == "operator":
+            continue
+        if not tokens:
+            continue
+
+        marker = tokens[0]
+        if marker in {"if", "while", "until", "for"}:
+            flow_stack.append({
+                "kind": "if" if marker == "if" else "loop",
+                "base": state.env.copy(),
+                "repository_base": repositories.checkouts.copy(),
+                "branches": [],
+                "repository_branches": [],
+                "has_else": False,
+                "phase": "condition",
+                "group_depth": len(state.scopes),
+            })
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+            # A for-loop assignment changes its iteration variable; if that is
+            # a protected ref identity, preserve uncertainty conservatively.
+            if marker == "for" and len(tokens) > 1 and tokens[0] in protected_keys:
+                state.env[tokens[0]] = ""
+        elif marker in {"then", "do"}:
+            if not flow_stack:
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack[-1]
+            if frame["phase"] == "condition" and not frame["branches"]:
+                frame["base"] = state.env.copy()
+                frame["repository_base"] = repositories.checkouts.copy()
+            frame["phase"] = "body"
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+        elif marker in {"else", "elif"}:
+            if not flow_stack or flow_stack[-1]["kind"] != "if" or flow_stack[-1]["phase"] != "body":
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack[-1]
+            frame["branches"].append(state.env.copy())
+            frame["repository_branches"].append(repositories.checkouts.copy())
+            restore_environment(frame["base"])
+            repositories.checkouts = frame["repository_base"].copy()
+            frame["has_else"] = marker == "else"
+            frame["phase"] = "body" if marker == "else" else "condition"
+            if marker == "elif":
+                predicate = tokens[1:]
+                mutated: set[str] = set()
+                if predicate and ASSIGNMENT.fullmatch(predicate[0]):
+                    match = ASSIGNMENT.fullmatch(predicate[0])
+                    assert match is not None
+                    mutated.add(match.group(1))
+                elif predicate and predicate[0] == "export":
+                    for token in predicate[1:]:
+                        match = ASSIGNMENT.fullmatch(token)
+                        if match:
+                            mutated.add(match.group(1))
+                elif predicate and predicate[0] == "unset":
+                    mutated.update(predicate[1:])
+                for key in mutated & protected_keys:
+                    frame["base"][key] = ""
+                    state.env[key] = ""
+                    for branch in frame["branches"]:
+                        branch[key] = ""
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+        elif marker in {"fi", "done"}:
+            expected_kind = "if" if marker == "fi" else "loop"
+            if not flow_stack or flow_stack[-1]["kind"] != expected_kind:
+                errors.append(f"{location}: unmatched shell control delimiter {marker}")
+                continue
+            frame = flow_stack.pop()
+            outcomes = list(frame["branches"])
+            outcomes.append(state.env.copy())
+            repository_outcomes = list(frame["repository_branches"])
+            repository_outcomes.append(repositories.checkouts.copy())
+            if frame["kind"] == "loop" or not frame["has_else"]:
+                outcomes.append(frame["base"])
+                repository_outcomes.append(frame["repository_base"])
+            restore_environment(merge_environments(outcomes))
+            repositories.merge(repository_outcomes)
+            tokens = tokens[1:]
+            if not tokens:
+                continue
+
+        # Commands that can mutate arbitrary shell state are outside the
+        # supported static grammar. If protected names are in scope, fail
+        # closed rather than carrying forward a possibly stale SHA.
+        command_name = tokens[0]
+        source_is_venv_activation = (
+            command_name == "source"
+            and len(tokens) == 2
+            and _shell_word(tokens[1])[0].replace("\\", "/").endswith("/venv/bin/activate")
+        )
+        if command_name in {"eval", "source", ".", "read"} and protected_keys and not source_is_venv_activation:
+            errors.append(f"{location}: unsupported shell state mutation via {command_name}")
+            for key in protected_keys:
+                state.env[key] = ""
+            continue
+        if command_name == "unset":
+            for key in tokens[1:]:
+                if key in protected_keys:
+                    state.env[key] = ""
+            continue
+
+        assignment_tokens: list[str] = []
+        offset = 0
+        if command_name == "export":
+            offset = 1
+            while offset < len(tokens) and ASSIGNMENT.fullmatch(tokens[offset]):
+                assignment_tokens.append(tokens[offset])
+                offset += 1
+            if offset == len(tokens):
+                for assignment in assignment_tokens:
+                    match = ASSIGNMENT.fullmatch(assignment)
+                    assert match is not None
+                    state.env[match.group(1)] = _assignment_value(match.group(2), state.env)
+                continue
+            # `export NAME` changes only export metadata, not the value.
+            continue
+
+        while offset < len(tokens) and ASSIGNMENT.fullmatch(tokens[offset]):
+            assignment_tokens.append(tokens[offset])
+            offset += 1
+        if assignment_tokens:
+            if offset == len(tokens):
+                # A bare assignment command persists in the current scope.
+                for assignment in assignment_tokens:
+                    match = ASSIGNMENT.fullmatch(assignment)
+                    assert match is not None
+                    state.env[match.group(1)] = _assignment_value(match.group(2), state.env)
+                continue
+            # Leading assignments are local to this command only.
+            command_env = state.env.copy()
+            for assignment in assignment_tokens:
+                match = ASSIGNMENT.fullmatch(assignment)
+                assert match is not None
+                command_env[match.group(1)] = _assignment_value(match.group(2), command_env)
+            command_tokens = tokens[offset:]
+        else:
+            command_env = state.env
+            command_tokens = tokens
+
+        invocation = _resolve_git_invocation(command_tokens, command_env)
+        if invocation.error:
+            errors.append(f"{location}: unsupported env/Git launcher syntax: {invocation.error}")
+            continue
+        git_index = invocation.executable_index
+        if git_index is None:
+            # Unknown declarations of protected values are not accepted.
+            if command_name in {"declare", "typeset", "local", "readonly"}:
+                for token in tokens[1:]:
+                    match = ASSIGNMENT.fullmatch(token)
+                    if match and match.group(1) in protected_keys:
+                        state.env[match.group(1)] = ""
+            continue
+        if _is_dynamic_executable(command_tokens[git_index]):
+            try:
+                subcommand, _ = _git_subcommand(command_tokens[git_index:])
+            except ValueError:
+                subcommand = None
+            if subcommand in {"checkout", "fetch", "clone"}:
+                errors.append(f"{location}: dynamic Git executable is unsupported for dependency {subcommand}")
+            continue
+        try:
+            git_tokens = command_tokens[git_index:]
+            subcommand, args_index = _git_subcommand(git_tokens)
+            git_cwd, _ = _git_working_directory(git_tokens, invocation.environment)
+            if git_cwd is not None:
+                git_cwd = _join_shell_paths(invocation.working_directory, git_cwd)
+            if subcommand == "checkout":
+                target = _checkout_target(git_tokens[args_index:])
+                error = _validate_target(target, invocation.environment, location, subcommand)
+                if error:
+                    errors.append(error)
+                selected_sha = _resolved_sha_value(target, invocation.environment)
+                if git_cwd is None:
+                    for path in repositories.checkouts:
+                        repositories.checkouts[path] = None
+                elif selected_sha:
+                    repositories.pin(git_cwd, selected_sha)
+            elif subcommand == "fetch":
+                for target in _fetch_targets(git_tokens[args_index:]):
+                    error = _validate_target(target, invocation.environment, location, subcommand)
+                    if error:
+                        errors.append(error)
+            elif subcommand == "clone":
+                if git_cwd is None:
+                    raise ValueError("ambiguous Git clone location")
+                destination = _clone_destination(git_tokens[args_index:], invocation.environment, git_cwd)
+                repositories.clone(destination)
+        except ValueError:
+            errors.append(f"{location}: unsupported or ambiguous Git dependency syntax")
+    if flow_stack:
+        errors.append(f"{location}: unclosed shell control clause")
+        for key in protected_keys:
+            state.env[key] = ""
+    if state.scopes and (protected_keys or _git_dependency_targets(script)):
+        errors.append(f"{location}: unclosed shell group")
+    if brace_depth and (protected_keys or repositories.checkouts or _git_dependency_targets(script)):
+        errors.append(f"{location}: unclosed shell brace group")
+    for path, selected_sha in repositories.checkouts.items():
+        if selected_sha is None:
+            errors.append(f"{location}: cloned dependency {path!r} is not pinned to a full 40-character commit SHA")
+    return errors
+
+
+def _extract_env_reference(value: str, pattern: re.Pattern[str]) -> str | None:
+    match = pattern.fullmatch(value.strip())
+    return match.group(1) if match else None
+
+
+def dependency_identity_keys(text: str) -> set[str]:
+    """Find environment keys that feed shell or actions/checkout refs."""
+    document, errors = _workflow(text, "workflow")
+    if errors or document is None:
+        return set()
+    keys: set[str] = set()
+    workflow_env = _mapping(document.get("env"))
+    for job in _mapping(document.get("jobs")).values():
+        job = _mapping(job)
+        for step in _steps(job):
+            for _, target in _git_dependency_targets(_yaml_value(step.get("run"))):
+                value, expandable = _shell_word(target)
+                name = _extract_env_reference(value, SHELL_ENV) if expandable else None
+                if name:
+                    keys.add(name)
+            with_values = _mapping(step.get("with"))
+            name = _extract_env_reference(_yaml_value(with_values.get("ref")), ACTION_REF_EXPRESSION)
+            if name:
+                keys.add(name)
+    return keys
+
+
 def semantic_action_refs(text: str, source: str = "workflow") -> list[tuple[str, str]]:
-    """Return only jobs.<id>.uses and jobs.<id>.steps[*].uses references."""
+    """Return reusable-job and step action ``uses`` values structurally."""
+    document, _ = _workflow(text, source)
+    if document is None:
+        return []
     refs: list[tuple[str, str]] = []
-    in_jobs = False
-    current_job: str | None = None
-    in_steps = False
-    step_indent: int | None = None
-    step_active = False
-    for number, raw in enumerate(text.splitlines(), 1):
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip(" "))
-        stripped = raw.strip()
-        if stripped == "jobs:":
-            in_jobs = True
-            current_job = None
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not in_jobs:
-            continue
-        if indent <= 1 and stripped and not stripped.startswith("jobs:"):
-            in_jobs = False
-            current_job = None
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if indent == 2 and stripped.endswith(":") and not stripped.startswith("-"):
-            current_job = stripped[:-1].strip(" '\"")
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if current_job is None:
-            continue
-        if indent == 4 and stripped.startswith("uses:"):
-            refs.append((f"{source}:jobs.{current_job}.uses:{number}", _value(stripped[6:].strip())))
-            continue
-        if indent == 4 and stripped == "steps:":
-            in_steps = True
-            step_indent = None
-            step_active = False
-            continue
-        if indent == 4 and stripped and not stripped.startswith("#"):
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not in_steps:
-            continue
-        if step_indent is None and indent > 4 and stripped.startswith("-"):
-            step_indent = indent
-            step_active = True
-        elif step_indent is not None and indent == step_indent and stripped.startswith("-"):
-            step_active = True
-        elif step_indent is not None and indent < step_indent:
-            in_steps = False
-            step_indent = None
-            step_active = False
-            continue
-        if not step_active or step_indent is None:
-            continue
-        if stripped.startswith("- uses:") and indent == step_indent:
-            refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[8:].strip())))
-        elif indent == step_indent + 2 and stripped.startswith("uses:"):
-            refs.append((f"{source}:jobs.{current_job}.steps:{number}", _value(stripped[6:].strip())))
+    for job_name, raw_job in _mapping(document.get("jobs")).items():
+        job = _mapping(raw_job)
+        job_uses = job.get("uses")
+        if isinstance(job_uses, str):
+            refs.append((f"{source}:jobs.{job_name}.uses", job_uses.strip()))
+        for index, step in enumerate(_steps(job)):
+            uses = step.get("uses")
+            if isinstance(uses, str):
+                refs.append((f"{source}:jobs.{job_name}.steps[{index}].uses", uses.strip()))
     return refs
 
 
+def _validate_target(target: str, env: dict[str, str], location: str, command: str) -> str | None:
+    target, expandable = _shell_word(target)
+    if SHA.fullmatch(target) or (expandable and _resolved_sha(target, env)):
+        return None
+    if expandable and (SHELL_ENV.fullmatch(target) or ACTION_REF_EXPRESSION.fullmatch(target)):
+        name = SHELL_ENV.fullmatch(target) or ACTION_REF_EXPRESSION.fullmatch(target)
+        key = name.group(1) if name else target
+        return f"{location}: {command} dependency identity {key} is undefined or not a full 40-character commit SHA"
+    if not SHA.fullmatch(target):
+        return f"{location}: {command} dependency ref {target!r} must use a full 40-character commit SHA"
+    return None
+
+
 def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
-    errors = []
-    if not re.search(r"(?m)^jobs:\s*$", text):
-        return [f"{source}: jobs mapping is required"]
+    document, errors = _workflow(text, source)
+    if errors or document is None:
+        return errors
     for location, ref in semantic_action_refs(text, source):
         error = validate_ref(ref, location)
         if error:
             errors.append(error)
+
+    workflow_env = _mapping(document.get("env"))
+    for job_name, raw_job in _mapping(document.get("jobs")).items():
+        job = _mapping(raw_job)
+        job_env = _mapping(job.get("env"))
+        # Reusable workflow jobs are also actions and were validated above.
+        for index, step in enumerate(_steps(job)):
+            location = f"{source}:jobs.{job_name}.steps[{index}]"
+            uses = _yaml_value(step.get("uses"))
+            action = _external_action_parts(uses)
+            if action and action[0].casefold() == "actions/checkout":
+                checkout_with = _mapping(step.get("with"))
+                repository = _yaml_value(checkout_with.get("repository"))
+                if repository and not _yaml_value(checkout_with.get("ref")):
+                    errors.append(f"{location}: dependency checkout repository requires an immutable ref")
+                if "ref" in checkout_with:
+                    env = _effective_env(workflow_env, job_env, step.get("env"))
+                    ref = _yaml_value(checkout_with.get("ref"))
+                    if not _resolved_sha(ref, env):
+                        errors.append(f"{location}: actions/checkout ref must resolve in this scope to a full 40-character commit SHA")
+            script = _yaml_value(step.get("run"))
+            env = _effective_env(workflow_env, job_env, step.get("env"))
+            protected: set[str] = set()
+            for _, target in _git_dependency_targets(script):
+                word, expandable = _shell_word(target)
+                name = _extract_env_reference(word, SHELL_ENV) if expandable else None
+                if name:
+                    protected.add(name)
+            errors.extend(_analyze_shell_script(script, env, location, protected))
     return errors
 
 

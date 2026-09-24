@@ -6,7 +6,7 @@ jobs:
   package-archive:
     runs-on: ubuntu-latest
     env:
-      PRODUCER_SHA: 2aeeb6c
+      PRODUCER_SHA: 2aeeb6ccfd67697868fd1020470a04290ead9336
       CORE_RUNTIME_SHA: 54bc7511bc42e553e47f2903668bc22a886d1c30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -48,6 +48,7 @@ jobs:
         run: |
           set -u
           git clone https://github.com/Xander-Xai/mcp-evidence-producer-trivy.git "$RUNNER_TEMP/producer"
+          git -C "$RUNNER_TEMP/producer" fetch --no-tags origin "$PRODUCER_SHA"
           git -C "$RUNNER_TEMP/producer" checkout --detach "$PRODUCER_SHA"
           python -m venv "$RUNNER_TEMP/venv"; source "$RUNNER_TEMP/venv/bin/activate"; pip install -q -e "$RUNNER_TEMP/producer"
           cd "$RUNNER_TEMP/producer"; set +e

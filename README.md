@@ -2,7 +2,11 @@
 
 Cross-repository dogfood for the [MCP Evidence Gate](https://github.com/Xander-Xai/mcp-evidence-gate) GitHub Action.
 
-This repository is an executable specification for downstream consumers. It keeps a small artifact and receipt fixtures, invokes the Action by immutable commit SHA, and asserts the expected release decision for each case.
+This repository is a cross-repository executable consumer specification. It keeps
+small artifact and receipt fixtures, invokes the Action by immutable commit SHA,
+and asserts the expected release decision for each case. Current acceptance lanes
+cover scanner completeness, OCI identity, package archives, SBOM admission, and
+interop composition.
 
 ## Decision matrix
 
@@ -24,11 +28,11 @@ The workflow uses `continue-on-error: true` for the Action step because `FAIL` a
 
 ## Scanner execution completeness
 
-Zero findings do not prove that a scanner completed. Producer's accepted runtime
-pin is
-`Xander-Xai/mcp-evidence-producer-trivy@94403156c57059dcce3d224f9b4c321fee32445e`.
-The live Producer repository HEAD is not persisted as an acceptance identity in
-this repository; resolve it from GitHub when performing a repository-state audit.
+Zero findings do not prove that a scanner completed. The accepted Producer runtime
+pin for the current scanner-completeness lane is
+`Xander-Xai/mcp-evidence-producer-trivy@29c420ebb6783122653ae6cbec6ba0713c4b920a`.
+The live Producer repository HEAD is queried during a repository-state audit and
+is not automatically an accepted runtime pin (`live HEAD != accepted pin`). The producer
 records the project-defined
 `scanner_execution` evidence extension. This repository adds a separate
 consumer policy in [`scripts/scanner_completeness_policy.py`](scripts/scanner_completeness_policy.py):
@@ -74,16 +78,20 @@ In `governance/promotion-gates.json`, legacy `CURRENT` statuses mean the active
 accepted runtime identity for that generation, not the live repository HEAD.
 The live HEAD is queried only during a repository-state audit. `core_promoted_main`
 and `producer_promoted_main` are retained legacy names for these accepted pins.
+Historical and lane-specific identities remain in governance evidence; a
+qualification candidate is never a promoted dependency.
 
 ## Workflow
 
-The workflow runs on pushes, pull requests, and manual dispatch. The legacy
-required-context bridge remains intentionally unchanged until D2; its anchors
-cannot succeed unless the complete promotion gate and `ci-hygiene` succeed:
+The workflow runs on pushes, pull requests, and manual dispatch. Current `main`
+branch protection requires `promotion-gate` and `adversarial-matrix`. The former
+five-context bridge is historical/superseded evidence in governance and is not a
+current required check:
 
 - `.github/workflows/mcp-evidence-gate.yml` consumes the remote Action with `uses: Xander-Xai/mcp-evidence-gate@06567c840c1d68a4b45ff2d12d6e6c32898fff11`, compares it with the bundled entrypoint from the same exact checkout, and asserts `REMOTE_ACTION_LOAD=PASS` plus every declared output.
-- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out promoted Producer `main` `94403156c57059dcce3d224f9b4c321fee32445e`, and calls Core `06567c840c1d68a4b45ff2d12d6e6c32898fff11`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
-- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use Producer `94403156c57059dcce3d224f9b4c321fee32445e` and Core `06567c840c1d68a4b45ff2d12d6e6c32898fff11`, while retaining their scanner-specific source, composition, and OCI identity assertions.
+- `.github/workflows/real-trivy-producer.yml` is an isolated real-scanner consumer: it verifies pinned Linux Trivy v0.74.0 bytes, checks out accepted Producer `main` `29c420ebb6783122653ae6cbec6ba0713c4b920a`, and calls Core `06567c840c1d68a4b45ff2d12d6e6c32898fff11`. Its only scanned input is the consumer-owned `evidence/real-trivy/requirements.txt`; runtime artifacts stay in the CI temp directory.
+- `.github/workflows/real-osv-producer.yml`, `.github/workflows/real-multi-receipt-composition.yml`, and `.github/workflows/real-oci-identity.yml` use the lane-specific Producer pin `29c420ebb6783122653ae6cbec6ba0713c4b920a` where applicable and Core `06567c840c1d68a4b45ff2d12d6e6c32898fff11`, while retaining their scanner-specific source, composition, and OCI identity assertions.
+- `.github/workflows/package-archive-supported-target-proof.yml` is the current package-archive proof. The earlier coverage workflow was a historical candidate proof and has been superseded by this workflow's promoted Producer oracle and explicit supported-target controls.
 - `.github/workflows/scanner-completeness-consumer.yml` is the promotion evidence for the Producer execution-completeness boundary. It keeps Core's decision separate from dogfood admission, proves `Results=[]` is inconclusive, and records `CORE_CHANGE_VERIFIED` for strict blocking of incomplete execution metadata.
 - The same workflow runs `scripts/run_core_snapshot_acceptance.mjs` against the exact Core build for the injected-reader TOCTOU proof and the no-path, missing-file, digest-mismatch, and missing-scanner-object P2 CLI cases.
 - `dist/example-artifact.bin` is marked as binary in `.gitattributes` so Windows line-ending conversion cannot change its digest.

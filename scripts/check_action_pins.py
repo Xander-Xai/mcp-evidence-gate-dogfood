@@ -42,14 +42,23 @@ def _shell_word(token: str) -> tuple[str, bool]:
     return token, True
 
 
+def _external_action_parts(value: str) -> tuple[str, str] | None:
+    """Parse an external action into its original repository identity and ref."""
+    match = EXTERNAL.fullmatch(value.strip())
+    if not match:
+        return None
+    ref = match.group(1)
+    return value.strip()[:-(len(ref) + 1)], ref
+
+
 def validate_ref(ref: str, location: str) -> str | None:
     ref = ref.strip()
     if ref.startswith("./") or ref.startswith("../"):
         return None
     if ref.startswith("docker://"):
         return f"{location}: docker references are unsupported"
-    match = EXTERNAL.fullmatch(ref)
-    if not match or not SHA.fullmatch(match.group(1)):
+    parts = _external_action_parts(ref)
+    if not parts or not SHA.fullmatch(parts[1]):
         return f"{location}: external Action must use a full 40-character commit SHA"
     return None
 
@@ -304,11 +313,27 @@ def _git_subcommand(tokens: list[str]) -> tuple[str | None, int]:
 
 def _is_git_executable(token: str) -> bool:
     """Recognize Git by executable basename, including explicit paths."""
-    return token.replace("\\", "/").rsplit("/", 1)[-1] == "git"
+    word, expandable = _shell_word(token)
+    if expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word):
+        return False
+    return word.replace("\\", "/").rsplit("/", 1)[-1] == "git"
+
+
+def _is_dynamic_executable(token: str) -> bool:
+    word, expandable = _shell_word(token)
+    return expandable and ("$" in word or "`" in word or "__CODEX_DYNAMIC_SUBSTITUTION__" in word)
 
 
 def _git_executable_index(tokens: list[str]) -> int | None:
-    return next((index for index, token in enumerate(tokens) if _is_git_executable(token)), None)
+    """Locate a Git command only in shell command position, after prefixes."""
+    index = 0
+    while index < len(tokens) and tokens[index] in {"if", "then", "elif", "else", "while", "until", "for", "do", "command", "exec"}:
+        index += 1
+    while index < len(tokens) and ASSIGNMENT.fullmatch(tokens[index]):
+        index += 1
+    if index < len(tokens) and (_is_git_executable(tokens[index]) or _is_dynamic_executable(tokens[index])):
+        return index
+    return None
 
 
 def _contains_git_dependency_operation(script: str) -> bool:
@@ -316,6 +341,10 @@ def _contains_git_dependency_operation(script: str) -> bool:
     for tokens in _shell_commands(script):
         index = _git_executable_index(tokens)
         if index is None:
+            continue
+        if _is_dynamic_executable(tokens[index]):
+            if any(token in {"checkout", "fetch"} for token in tokens[index + 1:]):
+                return True
             continue
         try:
             subcommand, _ = _git_subcommand(tokens[index:])
@@ -328,7 +357,7 @@ def _contains_git_dependency_operation(script: str) -> bool:
     return False
 
 
-def _checkout_target(args: list[str]) -> str | None:
+def _checkout_target(args: list[str]) -> str:
     """Return checkout's revision operand; support -b/-B and --orphan arity.
 
     Supported options: --detach, -b/--branch, -B, --orphan, --force/-f,
@@ -382,7 +411,9 @@ def _checkout_target(args: list[str]) -> str | None:
         return positional[0]
     if len(positional) > 1:
         raise ValueError("ambiguous git checkout with multiple positional operands")
-    return positional[0] if positional else None
+    if not positional:
+        raise ValueError("git checkout requires an explicit revision")
+    return positional[0]
 
 
 def _fetch_targets(args: list[str]) -> list[str]:
@@ -420,10 +451,13 @@ def _git_dependency_targets(script: str) -> list[tuple[str, str]]:
             continue
         try:
             subcommand, args_index = _git_subcommand(command_tokens[git_index:])
+            if _is_dynamic_executable(command_tokens[git_index]):
+                if subcommand in {"checkout", "fetch"}:
+                    targets.append(("invalid", ""))
+                continue
             if subcommand == "checkout":
                 target = _checkout_target(command_tokens[git_index + args_index:])
-                if target is not None:
-                    targets.append((subcommand, target))
+                targets.append((subcommand, target))
             elif subcommand == "fetch":
                 targets.extend((subcommand, target) for target in _fetch_targets(command_tokens[git_index + args_index:]))
         except ValueError:
@@ -551,14 +585,21 @@ def _analyze_shell_script(
                     if match and match.group(1) in protected_keys:
                         state.env[match.group(1)] = ""
             continue
+        if _is_dynamic_executable(command_tokens[git_index]):
+            try:
+                subcommand, _ = _git_subcommand(command_tokens[git_index:])
+            except ValueError:
+                subcommand = None
+            if subcommand in {"checkout", "fetch"}:
+                errors.append(f"{location}: dynamic Git executable is unsupported for dependency {subcommand}")
+            continue
         try:
             subcommand, args_index = _git_subcommand(command_tokens[git_index:])
             if subcommand == "checkout":
                 target = _checkout_target(command_tokens[git_index + args_index:])
-                if target is not None:
-                    error = _validate_target(target, command_env, location, subcommand)
-                    if error:
-                        errors.append(error)
+                error = _validate_target(target, command_env, location, subcommand)
+                if error:
+                    errors.append(error)
             elif subcommand == "fetch":
                 for target in _fetch_targets(command_tokens[git_index + args_index:]):
                     error = _validate_target(target, command_env, location, subcommand)
@@ -646,7 +687,8 @@ def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
         for index, step in enumerate(_steps(job)):
             location = f"{source}:jobs.{job_name}.steps[{index}]"
             uses = _yaml_value(step.get("uses"))
-            if uses.startswith("actions/checkout@"):
+            action = _external_action_parts(uses)
+            if action and action[0].casefold() == "actions/checkout":
                 checkout_with = _mapping(step.get("with"))
                 repository = _yaml_value(checkout_with.get("repository"))
                 if repository and not _yaml_value(checkout_with.get("ref")):

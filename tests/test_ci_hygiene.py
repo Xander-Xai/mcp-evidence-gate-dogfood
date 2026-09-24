@@ -126,6 +126,29 @@ jobs:
                 errors = validate_workflow_text(template.format(identity=SHA, action_sha=SHA, ref=ref))
                 self.assertTrue(any("actions/checkout ref" in error for error in errors))
 
+    def test_checkout_action_identity_is_case_insensitive(self):
+        for uses, ref in (
+            (f"Actions/Checkout@{SHA}", "main"),
+            (f"ACTIONS/CHECKOUT@{SHA}", "abcdef1"),
+            (f"actions/Checkout@{SHA}", None),
+        ):
+            with self.subTest(uses=uses, ref=ref):
+                fields = f"repository: owner/dependency\n          ref: {ref}\n" if ref is not None else "repository: owner/dependency\n"
+                text = f"jobs:\n  test:\n    steps:\n      - uses: {uses}\n        with:\n          {fields}"
+                self.assertTrue(validate_workflow_text(text), text)
+
+        flow_mutable = f"jobs:\n  test:\n    steps:\n      - uses: Actions/Checkout@{SHA}\n        with: {{repository: owner/dependency, ref: main}}\n"
+        self.assertTrue(validate_workflow_text(flow_mutable), flow_mutable)
+
+        valid_templates = (
+            f"uses: Actions/Checkout@{SHA}\n        with: {{repository: owner/dependency, ref: {SHA}}}",
+            f"env:\n  CORE_SHA: {SHA}\njobs:\n  test:\n    steps:\n      - uses: Actions/Checkout@{SHA}\n        with:\n          repository: owner/dependency\n          ref: ${{{{ env.CORE_SHA }}}}",
+        )
+        self.assertEqual(validate_workflow_text("jobs:\n  test:\n    steps:\n      - " + valid_templates[0] + "\n"), [])
+        self.assertEqual(validate_workflow_text(valid_templates[1]), [])
+        action_tag = f"jobs:\n  test:\n    steps:\n      - uses: Actions/Checkout@v4\n        with: {{repository: owner/dependency, ref: {SHA}}}\n"
+        self.assertTrue(any("full 40-character commit SHA" in error for error in validate_workflow_text(action_tag)))
+
     def test_git_checkout_literal_refs_and_quoted_checkout_actions_fail_closed(self):
         command_template = f"""
 jobs:
@@ -257,15 +280,57 @@ jobs:
             f"git checkout {SHA}",
             f"git checkout -B temporary {SHA}",
             f"git checkout -b temporary {SHA}",
-            "git checkout --orphan temporary",
+            f"git checkout --orphan temporary {SHA}",
         ):
             with self.subTest(command=command):
                 text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
                 self.assertEqual(validate_workflow_text(text), [])
-        for command in ("git checkout -B temporary main", "git checkout -b temporary abcdef1", "git checkout main"):
+        for command in (
+            "git checkout -B temporary main", "git checkout -b temporary abcdef1", "git checkout main",
+            "git checkout --orphan temporary",
+        ):
             with self.subTest(command=command):
                 text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
                 self.assertTrue(validate_workflow_text(text))
+
+    def test_git_checkout_requires_explicit_revision(self):
+        for command in (
+            "git checkout", "git checkout --detach", "git checkout -f", "git checkout --quiet",
+            "git checkout --detach --force", "/usr/bin/git checkout --detach",
+            '"/usr/bin/git" checkout --detach', "(git checkout --detach)",
+            '("/usr/bin/git" -C repo checkout --detach)', "git -C repo checkout --detach",
+        ):
+            with self.subTest(command=command):
+                text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
+                self.assertTrue(validate_workflow_text(text), command)
+        for command in (f"git checkout {SHA}", f"git checkout --detach {SHA}", f"git -C repo checkout {SHA}"):
+            with self.subTest(command=command):
+                text = f"jobs:\n  test:\n    steps:\n      - run: {command}\n"
+                self.assertEqual(validate_workflow_text(text), [])
+
+    def test_quoted_and_dynamic_git_executables(self):
+        invalid = (
+            '"/usr/bin/git" checkout main', "'/usr/bin/git' checkout main", '"git" checkout main',
+            '"/usr/bin/git" -C repo checkout main', '"/usr/bin/git" fetch origin main',
+            '"$GIT_BIN" checkout ' + SHA, '${GIT_BIN} checkout ' + SHA,
+            '$(which git) checkout ' + SHA, '`which git` checkout ' + SHA,
+            '"/usr/bin/git" checkout --detach',
+            'ignored=$("/usr/bin/git" -C repo checkout main)',
+            '"C:\\tools\\git" checkout main',
+        )
+        for command in invalid:
+            with self.subTest(command=command):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in command.splitlines())
+                self.assertTrue(validate_workflow_text(text), command)
+
+        valid = (
+            f'"/usr/bin/git" checkout {SHA}', f"'git' -C repo checkout {SHA}",
+            f'"/usr/bin/git" fetch origin {SHA}', f'("/usr/bin/git" -C repo checkout {SHA})',
+        )
+        for command in valid:
+            with self.subTest(command=command):
+                text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in command.splitlines())
+                self.assertEqual(validate_workflow_text(text), [], command)
 
     def test_shell_assignments_are_tracked_in_execution_order(self):
         cases = (

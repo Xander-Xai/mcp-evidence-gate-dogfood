@@ -126,6 +126,29 @@ jobs:
                 errors = validate_workflow_text(template.format(identity=SHA, action_sha=SHA, ref=ref))
                 self.assertTrue(any("actions/checkout ref" in error for error in errors))
 
+    def test_git_checkout_literal_refs_and_quoted_checkout_actions_fail_closed(self):
+        command_template = f"""
+jobs:
+  test:
+    steps:
+      - run: git checkout {{ref}}
+"""
+        for ref in ("main", "v1.2.3", "1234567", "12345678", "1234567890ab"):
+            with self.subTest(ref=ref):
+                self.assertTrue(validate_workflow_text(command_template.format(ref=ref)))
+        self.assertEqual(validate_workflow_text(command_template.format(ref=SHA)), [])
+
+        quoted_action = f"""
+jobs:
+  test:
+    steps:
+      - uses: 'actions/checkout@{SHA}'
+        with:
+          repository: owner/dependency
+          ref: main
+"""
+        self.assertTrue(any("actions/checkout ref" in error for error in validate_workflow_text(quoted_action)))
+
     def test_checkout_identity_discovery_covers_current_workflows(self):
         root = Path(__file__).resolve().parents[1]
         discovered: set[str] = set()

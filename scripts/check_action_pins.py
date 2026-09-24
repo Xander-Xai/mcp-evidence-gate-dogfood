@@ -4,13 +4,12 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
 SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 EXTERNAL = re.compile(r"^[^/@\s]+/[^@\s]+@(.+)$")
-DEPENDENCY_COMMAND = re.compile(r"\bgit\b[^\n]*(?:\bcheckout\b|\bfetch\b)[^\n]*")
-SHELL_VARIABLE = re.compile(r"\$\{?([A-Z][A-Z0-9_]*)\}?")
 ACTION_REF_EXPRESSION = re.compile(r"^\$\{\{\s*env\.([A-Z][A-Z0-9_]*)\s*\}\}$")
 KEY_DEFINITION = re.compile(r"^\s*([A-Z][A-Z0-9_]*):(?:\s+(.*?))?\s*$")
 
@@ -126,11 +125,55 @@ def _without_yaml_comment(value: str) -> str:
     return value.strip()
 
 
+def _yaml_scalar(value: str) -> str:
+    value = _without_yaml_comment(value)
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _git_dependency_targets(text: str) -> list[tuple[str, str]]:
+    """Return explicit checkout refs and fetch refspecs from workflow shell lines."""
+    targets: list[tuple[str, str]] = []
+    for match in re.finditer(r"(?<![\w-])git\b([^\r\n]*)", text):
+        try:
+            tokens = shlex.split(match.group(1), comments=True)
+        except ValueError:
+            # Malformed quoting in a line containing a dependency command must
+            # fail closed instead of suppressing identity discovery.
+            if re.search(r"\b(checkout|fetch)\b", match.group(1)):
+                targets.append(("invalid", ""))
+            continue
+        command_index = next((i for i, token in enumerate(tokens) if token in {"checkout", "fetch"}), None)
+        if command_index is None:
+            continue
+        command = tokens[command_index]
+        arguments = tokens[command_index + 1:]
+        if command == "checkout":
+            if "--" in arguments:
+                before_path = arguments[:arguments.index("--")]
+            else:
+                before_path = arguments
+            target = next((token for token in before_path if not token.startswith("-")), None)
+            if target is not None:
+                targets.append((command, target.rstrip(");&|")))
+        else:
+            remote_index = next((i for i, token in enumerate(arguments) if not token.startswith("-")), None)
+            if remote_index is None:
+                continue
+            for target in arguments[remote_index + 1:]:
+                if not target.startswith("-"):
+                    targets.append((command, target.rstrip(");&|")))
+    return targets
+
+
 def dependency_identity_keys(text: str) -> set[str]:
     """Find env keys that feed git checkout/fetch or actions/checkout refs."""
     keys: set[str] = set()
-    for command in DEPENDENCY_COMMAND.findall(text):
-        keys.update(SHELL_VARIABLE.findall(command))
+    for _, target in _git_dependency_targets(text):
+        variable = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", target)
+        if variable:
+            keys.add(variable.group(1))
     lines = text.splitlines()
     step_indent: int | None = None
     uses_checkout = False
@@ -149,17 +192,14 @@ def dependency_identity_keys(text: str) -> set[str]:
             continue
         if indent == step_indent + 2 and stripped.startswith("-"):
             uses_checkout = False
-            inline = re.match(r"-\s*uses:\s*actions/checkout@", stripped)
-            if inline:
-                uses_checkout = True
+            inline = re.match(r"-\s*uses:\s*(.+)$", stripped)
+            uses_checkout = bool(inline and _yaml_scalar(inline.group(1)).startswith("actions/checkout@"))
             continue
         if indent == step_indent + 4 and stripped.startswith("uses:"):
-            uses_checkout = stripped[6:].strip().startswith("actions/checkout@")
+            uses_checkout = _yaml_scalar(stripped[6:].strip()).startswith("actions/checkout@")
             continue
         if uses_checkout and stripped.startswith("ref:"):
-            value = _without_yaml_comment(stripped[4:].strip())
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                value = value[1:-1]
+            value = _yaml_scalar(stripped[4:].strip())
             match = ACTION_REF_EXPRESSION.fullmatch(value)
             if match:
                 keys.add(match.group(1))
@@ -185,10 +225,11 @@ def _checkout_action_refs(text: str) -> list[tuple[int, str]]:
             uses_checkout = False
             continue
         if indent == step_indent + 2 and stripped.startswith("-"):
-            uses_checkout = bool(re.match(r"-\s*uses:\s*actions/checkout@", stripped))
+            inline = re.match(r"-\s*uses:\s*(.+)$", stripped)
+            uses_checkout = bool(inline and _yaml_scalar(inline.group(1)).startswith("actions/checkout@"))
             continue
         if indent == step_indent + 4 and stripped.startswith("uses:"):
-            uses_checkout = stripped[6:].strip().startswith("actions/checkout@")
+            uses_checkout = _yaml_scalar(stripped[6:].strip()).startswith("actions/checkout@")
             continue
         if uses_checkout and stripped.startswith("ref:"):
             refs.append((number, _without_yaml_comment(stripped[4:].strip())))
@@ -214,19 +255,26 @@ def validate_workflow_text(text: str, source: str = "workflow") -> list[str]:
     # Validate only values that flow into dependency checkout operations, so
     # ordinary artifact and binary digests remain outside this Git identity gate.
     keys = dependency_identity_keys(text)
-    for number, key, value in _identity_values(text, keys):
+    identity_values = _identity_values(text, keys)
+    for number, key, value in identity_values:
         if not SHA.fullmatch(value):
             errors.append(f"{source}:line {number}: {key} must use a full 40-character commit SHA")
     for number, raw_value in _checkout_action_refs(text):
-        value = raw_value
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
+        value = _yaml_scalar(raw_value)
         if SHA.fullmatch(value):
             continue
         indirection = ACTION_REF_EXPRESSION.fullmatch(value)
         if indirection and any(key == indirection.group(1) and SHA.fullmatch(identity) for _, key, identity in _identity_values(text, keys)):
             continue
         errors.append(f"{source}:line {number}: actions/checkout ref must be a full 40-character commit SHA or validated env identity")
+    for command, target in _git_dependency_targets(text):
+        variable = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", target)
+        if variable:
+            key = variable.group(1)
+            if not any(name == key for _, name, _ in identity_values):
+                errors.append(f"{source}: {command} dependency identity {key} must use a full 40-character commit SHA")
+        elif not SHA.fullmatch(target):
+            errors.append(f"{source}: {command} dependency ref {target!r} must use a full 40-character commit SHA")
     for location, ref in semantic_action_refs(text, source):
         error = validate_ref(ref, location)
         if error:

@@ -135,13 +135,19 @@ def _yaml_scalar(value: str) -> str:
 def _git_dependency_targets(text: str) -> list[tuple[str, str]]:
     """Return explicit checkout refs and fetch refspecs from workflow shell lines."""
     targets: list[tuple[str, str]] = []
-    for match in re.finditer(r"(?<![\w-])git\b([^\r\n]*)", text):
+    matches = list(re.finditer(r"(?<![\w-])git\b", text))
+    for index, match in enumerate(matches):
+        line_end = text.find("\n", match.start())
+        if line_end < 0:
+            line_end = len(text)
+        end = min(line_end, matches[index + 1].start()) if index + 1 < len(matches) else line_end
+        command_text = text[match.end():end]
         try:
-            tokens = shlex.split(match.group(1), comments=True)
+            tokens = shlex.split(command_text, comments=True)
         except ValueError:
             # Malformed quoting in a line containing a dependency command must
             # fail closed instead of suppressing identity discovery.
-            if re.search(r"\b(checkout|fetch)\b", match.group(1)):
+            if re.search(r"\b(checkout|fetch)\b", command_text):
                 targets.append(("invalid", ""))
             continue
         command_index = next((i for i, token in enumerate(tokens) if token in {"checkout", "fetch"}), None)
@@ -174,65 +180,61 @@ def dependency_identity_keys(text: str) -> set[str]:
         variable = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", target)
         if variable:
             keys.add(variable.group(1))
-    lines = text.splitlines()
-    step_indent: int | None = None
-    uses_checkout = False
-    for number, raw in enumerate(lines):
-        stripped = raw.strip()
-        indent = len(raw) - len(raw.lstrip(" "))
-        if stripped == "steps:":
-            step_indent = indent
-            uses_checkout = False
-            continue
-        if step_indent is None:
-            continue
-        if indent <= step_indent and stripped:
-            step_indent = None
-            uses_checkout = False
-            continue
-        if indent == step_indent + 2 and stripped.startswith("-"):
-            uses_checkout = False
-            inline = re.match(r"-\s*uses:\s*(.+)$", stripped)
-            uses_checkout = bool(inline and _yaml_scalar(inline.group(1)).startswith("actions/checkout@"))
-            continue
-        if indent == step_indent + 4 and stripped.startswith("uses:"):
-            uses_checkout = _yaml_scalar(stripped[6:].strip()).startswith("actions/checkout@")
-            continue
-        if uses_checkout and stripped.startswith("ref:"):
-            value = _yaml_scalar(stripped[4:].strip())
-            match = ACTION_REF_EXPRESSION.fullmatch(value)
-            if match:
-                keys.add(match.group(1))
+    for _, value in _checkout_action_refs(text):
+        match = ACTION_REF_EXPRESSION.fullmatch(_yaml_scalar(value))
+        if match:
+            keys.add(match.group(1))
     return keys
 
 
 def _checkout_action_refs(text: str) -> list[tuple[int, str]]:
     refs: list[tuple[int, str]] = []
     lines = text.splitlines()
-    step_indent: int | None = None
-    uses_checkout = False
+    list_indent: int | None = None
+    step_lines: list[tuple[int, str]] = []
+
+    def collect_step() -> None:
+        if list_indent is None or not step_lines:
+            return
+        first_number, first_line = step_lines[0]
+        first = first_line.strip()
+        inline = re.match(r"-\s*uses:\s*(.+)$", first)
+        uses = _yaml_scalar(inline.group(1)) if inline else ""
+        refs_in_step: list[tuple[int, str]] = []
+        for number, raw in step_lines[1:]:
+            stripped = raw.strip()
+            indent = len(raw) - len(raw.lstrip(" "))
+            if indent == list_indent + 2 and stripped.startswith("uses:"):
+                uses = _yaml_scalar(stripped[6:].strip())
+            elif indent == list_indent + 4 and stripped.startswith("ref:"):
+                refs_in_step.append((number, _yaml_scalar(stripped[4:].strip())))
+        if uses.startswith("actions/checkout@"):
+            refs.extend(refs_in_step)
+
+    steps_indent: int | None = None
     for number, raw in enumerate(lines, 1):
         stripped = raw.strip()
         indent = len(raw) - len(raw.lstrip(" "))
         if stripped == "steps:":
-            step_indent = indent
-            uses_checkout = False
+            collect_step()
+            step_lines = []
+            steps_indent = indent
+            list_indent = indent + 2
             continue
-        if step_indent is None:
+        if steps_indent is None:
             continue
-        if indent <= step_indent and stripped:
-            step_indent = None
-            uses_checkout = False
+        if stripped and indent <= steps_indent:
+            collect_step()
+            step_lines = []
+            steps_indent = None
+            list_indent = None
             continue
-        if indent == step_indent + 2 and stripped.startswith("-"):
-            inline = re.match(r"-\s*uses:\s*(.+)$", stripped)
-            uses_checkout = bool(inline and _yaml_scalar(inline.group(1)).startswith("actions/checkout@"))
-            continue
-        if indent == step_indent + 4 and stripped.startswith("uses:"):
-            uses_checkout = _yaml_scalar(stripped[6:].strip()).startswith("actions/checkout@")
-            continue
-        if uses_checkout and stripped.startswith("ref:"):
-            refs.append((number, _without_yaml_comment(stripped[4:].strip())))
+        if list_indent is not None and indent == list_indent and stripped.startswith("-"):
+            collect_step()
+            step_lines = [(number, raw)]
+        elif step_lines:
+            step_lines.append((number, raw))
+    collect_step()
     return refs
 
 

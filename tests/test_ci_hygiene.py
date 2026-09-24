@@ -138,6 +138,17 @@ jobs:
                 self.assertTrue(validate_workflow_text(command_template.format(ref=ref)))
         self.assertEqual(validate_workflow_text(command_template.format(ref=SHA)), [])
 
+        multiple_commands = f"""
+jobs:
+  test:
+    env:
+      GOOD_SHA: {SHA}
+    steps:
+      - run: git checkout "$GOOD_SHA"; git checkout main
+"""
+        errors = validate_workflow_text(multiple_commands)
+        self.assertTrue(any("dependency ref 'main'" in error for error in errors))
+
         quoted_action = f"""
 jobs:
   test:
@@ -148,6 +159,18 @@ jobs:
           ref: main
 """
         self.assertTrue(any("actions/checkout ref" in error for error in validate_workflow_text(quoted_action)))
+
+    def test_actions_checkout_inputs_are_independent_of_yaml_key_order(self):
+        text = f"""
+jobs:
+  test:
+    steps:
+      - with:
+          repository: owner/dependency
+          ref: main
+        uses: actions/checkout@{SHA}
+"""
+        self.assertTrue(any("actions/checkout ref" in error for error in validate_workflow_text(text)))
 
     def test_checkout_identity_discovery_covers_current_workflows(self):
         root = Path(__file__).resolve().parents[1]

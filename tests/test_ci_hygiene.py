@@ -777,6 +777,108 @@ jobs:
         root = Path(__file__).resolve().parents[1]
         self.assertEqual(validate_tree(root), [])
 
+    def test_worktree_changing_subcommands_are_rejected_for_pinned_dependencies(self):
+        sha_a = SHA
+        sha_b = SHA[::-1]
+        pinned = f"git clone repo dep\ngit -C dep checkout {sha_a}"
+
+        def check(script):
+            text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            f"{pinned}\ngit -C dep switch main",
+            f"{pinned}\ngit -C dep switch -c topic",
+            f"{pinned}\ngit -C dep switch --force main",
+            f"{pinned}\ngit -C dep switch --detach {sha_b}",
+            f"{pinned}\ngit -C dep switch main\ngit -C dep checkout {sha_b}",
+            f"{pinned}\ngit -C dep reset --hard",
+            f"{pinned}\ngit -C dep merge origin/main",
+            f"{pinned}\ngit -C dep rebase main",
+            f"{pinned}\ngit -C dep pull",
+            f"{pinned}\ngit -C dep revert HEAD",
+            f"{pinned}\ngit -C dep cherry-pick {sha_b}",
+            f"{pinned}\ngit -C dep am patch.mbox",
+            f"{pinned}\nenv git -C dep switch main",
+            f"{pinned}\ncommand -p git -C dep switch main",
+            f'{pinned}\n"$GIT_BIN" -C dep switch main',
+            f"{pinned}\nignored=$(git -C dep switch main)",
+            f'{pinned}\ngit -C "$DEP_DIR" switch main',
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                self.assertTrue(check(script), script)
+
+        valid = (
+            f"{pinned}",
+            f"git switch --detach {sha_a}",
+            f"git reset --hard",
+            f"git clone repo-a dep-a\ngit -C dep-a checkout {sha_a}\ngit -C dep-b switch main",
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                self.assertEqual(check(script), [], script)
+
+    def test_compound_quoted_shell_words_are_decoded_before_git_matching(self):
+        def check(script):
+            text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            'git check"out" main',
+            "git check'out' main",
+            'git che"ckout" main',
+            'git "check"out main',
+            'git -C repo check"out" main',
+            'git fet"ch" origin main',
+            'ignored=$(git -C repo check"out" main)',
+        )
+        for command in invalid:
+            with self.subTest(command=command):
+                self.assertTrue(check(command), command)
+
+        valid = (
+            f'git check"out" {SHA}',
+            f"git che'ckout' {SHA}",
+            f'git fet"ch" origin {SHA}',
+            f'git clone repo dep\ngit -C dep check"out" {SHA}',
+            f'git clone repo dep\ngit -C dep "check"out {SHA}',
+        )
+        for command in valid:
+            with self.subTest(command=command):
+                self.assertEqual(check(command), [], command)
+
+    def test_eval_and_state_mutators_fail_closed_when_dependency_operations_exist(self):
+        pinned = f"git clone repo dep\ngit -C dep checkout {SHA}"
+
+        def check(script):
+            text = "jobs:\n  test:\n    steps:\n      - run: |\n" + "".join(f"          {line}\n" for line in script.splitlines())
+            return validate_workflow_text(text)
+
+        invalid = (
+            f"{pinned}\ncd dep; eval 'git checkout main'",
+            f"{pinned}\neval 'git checkout main'",
+            f'{pinned}\neval "git checkout main"',
+            f"git checkout {SHA}\neval 'git checkout main'",
+            f"{pinned}\nsource ./environment.sh",
+            f"{pinned}\nread -r value",
+            f"git -C dep switch --detach {SHA}\neval 'git checkout main'",
+        )
+        for script in invalid:
+            with self.subTest(script=script):
+                self.assertTrue(check(script), script)
+
+        valid = (
+            "eval 'echo hello'",
+            "source ./environment.sh",
+            "read -r value",
+            'source "$RUNNER_TEMP/venv/bin/activate"',
+            f'{pinned}\nsource "$RUNNER_TEMP/venv/bin/activate"',
+        )
+        for script in valid:
+            with self.subTest(script=script):
+                self.assertEqual(check(script), [], script)
+
     def test_governance_and_composition_json_parse(self):
         root = Path(__file__).resolve().parents[1]
         for relative in ("governance/promotion-gates.json", "evidence/consumer-composition-set.json"):

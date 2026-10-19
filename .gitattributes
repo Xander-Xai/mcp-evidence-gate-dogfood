@@ -1,1 +1,4 @@
 *.bin binary
+# Preserve exact committed evidence bytes for digest-bound fixtures across checkout platforms.
+# Prevent autocrlf from rewriting JSON evidence and raw scanner reports.
+evidence/** -text

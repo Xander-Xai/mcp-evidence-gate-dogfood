@@ -1,4 +1,7 @@
+import hashlib
 import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -105,6 +108,69 @@ jobs:
         for relative in ("governance/promotion-gates.json", "evidence/consumer-composition-set.json"):
             with (root / relative).open(encoding="utf-8") as handle:
                 json.load(handle)
+
+
+    def test_digest_pinned_evidence_is_byte_stable(self):
+        root = Path(__file__).resolve().parents[1]
+        clean_receipt = json.loads(
+            (root / "evidence/clean/evidence-match-receipt.json").read_text(encoding="utf-8")
+        )
+        scanner_fixture = root / "evidence/scanner-completeness/zero-findings-incomplete"
+        scanner_receipt = json.loads((scanner_fixture / "receipt.json").read_text(encoding="utf-8"))
+        scanner_evidence = json.loads((scanner_fixture / "evidence.json").read_text(encoding="utf-8"))
+        pinned = {
+            "evidence/clean/evidence-report.json": clean_receipt["evidence_digest"],
+            "evidence/scanner-completeness/zero-findings-incomplete/evidence.json":
+                scanner_receipt["evidence_digest"],
+            "evidence/scanner-completeness/zero-findings-incomplete/trivy.raw.json":
+                "sha256:" + scanner_evidence["raw_report"]["sha256"],
+        }
+        for relative, expected in pinned.items():
+            with self.subTest(path=relative):
+                actual = "sha256:" + hashlib.sha256((root / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected)
+                attributes = subprocess.check_output(
+                    ["git", "check-attr", "text", "eol", "--", relative],
+                    cwd=root,
+                    text=True,
+                ).splitlines()
+                # Both -text and an explicit LF checkout prevent CRLF hash drift.
+                self.assertTrue(
+                    f"{relative}: text: unset" in attributes
+                    or f"{relative}: eol: lf" in attributes,
+                    f"Digest-pinned evidence lacks cross-platform byte protection: {relative}",
+                )
+
+
+        # Materialize the real pinned fixture bytes into a separate Git repo,
+        # then verify actual checkout results with both autocrlf settings.
+        with tempfile.TemporaryDirectory(prefix="dogfood-evidence-checkout-") as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            (source / ".gitattributes").write_bytes((root / ".gitattributes").read_bytes())
+            for relative in pinned:
+                destination = source / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((root / relative).read_bytes())
+
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Fixture Test", "-c", "user.email=fixture@example.invalid",
+                 "commit", "-qm", "record digest-pinned fixtures"],
+                cwd=source,
+                check=True,
+            )
+            for setting in ("true", "false"):
+                checkout = Path(temporary) / f"checkout-{setting}"
+                subprocess.run(
+                    ["git", "-c", f"core.autocrlf={setting}", "clone", "-q", str(source), str(checkout)],
+                    check=True,
+                )
+                for relative, expected in pinned.items():
+                    with self.subTest(path=relative, autocrlf=setting):
+                        digest = "sha256:" + hashlib.sha256((checkout / relative).read_bytes()).hexdigest()
+                        self.assertEqual(digest, expected)
 
 
 if __name__ == "__main__":

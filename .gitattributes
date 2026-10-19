@@ -1,2 +1,4 @@
 *.bin binary
-evidence/scanner-completeness/zero-findings-incomplete/evidence.json text eol=lf
+# Preserve exact committed evidence bytes for digest-bound fixtures across checkout platforms.
+# Prevent autocrlf from rewriting JSON evidence and raw scanner reports.
+evidence/** -text

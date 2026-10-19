@@ -1,4 +1,6 @@
+import hashlib
 import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -105,6 +107,38 @@ jobs:
         for relative in ("governance/promotion-gates.json", "evidence/consumer-composition-set.json"):
             with (root / relative).open(encoding="utf-8") as handle:
                 json.load(handle)
+
+
+    def test_digest_pinned_evidence_is_byte_stable(self):
+        root = Path(__file__).resolve().parents[1]
+        clean_receipt = json.loads(
+            (root / "evidence/clean/evidence-match-receipt.json").read_text(encoding="utf-8")
+        )
+        scanner_fixture = root / "evidence/scanner-completeness/zero-findings-incomplete"
+        scanner_receipt = json.loads((scanner_fixture / "receipt.json").read_text(encoding="utf-8"))
+        scanner_evidence = json.loads((scanner_fixture / "evidence.json").read_text(encoding="utf-8"))
+        pinned = {
+            "evidence/clean/evidence-report.json": clean_receipt["evidence_digest"],
+            "evidence/scanner-completeness/zero-findings-incomplete/evidence.json":
+                scanner_receipt["evidence_digest"],
+            "evidence/scanner-completeness/zero-findings-incomplete/trivy.raw.json":
+                "sha256:" + scanner_evidence["raw_report"]["sha256"],
+        }
+        for relative, expected in pinned.items():
+            with self.subTest(path=relative):
+                actual = "sha256:" + hashlib.sha256((root / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected)
+                attributes = subprocess.check_output(
+                    ["git", "check-attr", "text", "eol", "--", relative],
+                    cwd=root,
+                    text=True,
+                ).splitlines()
+                # Both -text and an explicit LF checkout prevent CRLF hash drift.
+                self.assertTrue(
+                    f"{relative}: text: unset" in attributes
+                    or f"{relative}: eol: lf" in attributes,
+                    f"Digest-pinned evidence lacks cross-platform byte protection: {relative}",
+                )
 
 
 if __name__ == "__main__":

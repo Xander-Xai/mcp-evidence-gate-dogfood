@@ -87,7 +87,7 @@ def _shell_word(token: str) -> tuple[str, bool]:
             expandable = True
             continue
         if char == "\\" and index + 1 < len(token):
-            parts.append(token[index:index + 2])
+            parts.append(token[index + 1])
             index += 2
             expandable = True
             continue
@@ -311,7 +311,7 @@ def _shell_events(script: str) -> list[tuple[str, list[str]]]:
         elif line == "esac" and case_depth:
             case_depth -= 1
         if line.endswith("\\"):
-            pending = line[:-1] + " "
+            pending = line[:-1]
             continue
         pending = ""
         line, unsafe_substitution = _mask_command_substitutions(line)

@@ -804,6 +804,8 @@ jobs:
             f'{pinned}\n"$GIT_BIN" -C dep switch main',
             f"{pinned}\nignored=$(git -C dep switch main)",
             f'{pinned}\ngit -C "$DEP_DIR" switch main',
+            f"{pinned}\ngit -C dep swi\\tch main",
+            f"{pinned}\ngit -C dep \\switch main",
         )
         for script in invalid:
             with self.subTest(script=script):
@@ -832,6 +834,11 @@ jobs:
             'git -C repo check"out" main',
             'git fet"ch" origin main',
             'ignored=$(git -C repo check"out" main)',
+            r"git check\out main",
+            r"git \checkout main",
+            r"git chec\kout main",
+            r"git fet\ch origin main",
+            'git "chec\\\nkout" main',
         )
         for command in invalid:
             with self.subTest(command=command):
@@ -843,6 +850,10 @@ jobs:
             f'git fet"ch" origin {SHA}',
             f'git clone repo dep\ngit -C dep check"out" {SHA}',
             f'git clone repo dep\ngit -C dep "check"out {SHA}',
+            rf"git check\out {SHA}",
+            rf"git chec\kout {SHA}",
+            f'git clon\\e repo dep\ngit -C dep checkout {SHA}',
+            f'git "chec\\\nkout" {SHA}',
         )
         for command in valid:
             with self.subTest(command=command):

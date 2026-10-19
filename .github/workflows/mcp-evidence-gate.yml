@@ -281,6 +281,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install structural YAML parser
+        run: python -m pip install --disable-pip-version-check --no-input PyYAML==6.0.2
+
       - name: Run Dogfood CI hygiene tests
         run: python -m unittest -q tests/test_ci_hygiene.py
 

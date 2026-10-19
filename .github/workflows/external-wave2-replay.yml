@@ -39,6 +39,20 @@ jobs:
           corepack enable; corepack prepare pnpm@10.33.4 --activate
           pnpm --dir "$RUNNER_TEMP/core" install --frozen-lockfile
           pnpm --dir "$RUNNER_TEMP/core" build
+      - name: Acquire immutable Xander-Xai source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/Xander-Xai/dbhub.git "$RUNNER_TEMP/src-dbhub"
+          git -C "$RUNNER_TEMP/src-dbhub" checkout --detach 6234ad6338b93ddd08d526b51b164e19dbc6eeab
+          git clone --no-checkout https://github.com/Xander-Xai/mcp-server.git "$RUNNER_TEMP/src-mcp-server"
+          git -C "$RUNNER_TEMP/src-mcp-server" checkout --detach 12b15b112a1024cdfae84d8e090f5c360d25f6d2
+          git clone --no-checkout https://github.com/Xander-Xai/slack-mcp-server.git "$RUNNER_TEMP/src-slack-mcp-server"
+          git -C "$RUNNER_TEMP/src-slack-mcp-server" checkout --detach 1ff7a5128e905d57c0ea1e6d569ddbb7db7b1173
+          git clone --no-checkout https://github.com/Xander-Xai/mineru-mcp.git "$RUNNER_TEMP/src-mineru-mcp"
+          git -C "$RUNNER_TEMP/src-mineru-mcp" checkout --detach fa139f99842050db91ab5901077ed9878530237b
+          git clone --no-checkout https://github.com/Xander-Xai/cytoscape-desktop-mcp.git "$RUNNER_TEMP/src-cytoscape-desktop-mcp"
+          git -C "$RUNNER_TEMP/src-cytoscape-desktop-mcp" checkout --detach e52dbd0e4d85762d545642c04e7f73b903b203eb
       - name: Build exact artifacts from Xander-Xai forks
         shell: bash
         run: |
@@ -46,8 +60,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/replay"
           for repo in dbhub mcp-server slack-mcp-server mineru-mcp; do
             dir="$RUNNER_TEMP/src-$repo"; out="$RUNNER_TEMP/replay/$repo"; mkdir -p "$out"
-            git clone --depth 1 "https://github.com/Xander-Xai/$repo.git" "$dir" >"$out/clone.log" 2>&1
-            if [ $? -ne 0 ]; then echo '{"classification":"HARNESS_FAILURE","reason":"clone_failed"}' > "$out/result.json"; continue; fi
             (cd "$dir" && if [ -f pnpm-lock.yaml ]; then corepack enable; corepack prepare pnpm@10.33.4 --activate; pnpm install --frozen-lockfile; else npm install; fi && npm pack --silent --pack-destination "$out") >"$out/build.log" 2>&1
             if [ $? -ne 0 ]; then echo '{"classification":"HARNESS_FAILURE","reason":"release_pack_failed"}' > "$out/result.json"; continue; fi
             artifact=$(find "$out" -maxdepth 1 -type f -name '*.tgz' | head -1)
@@ -55,11 +67,7 @@ jobs:
             echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" > "$out/artifact.sha256"
           done
           dir="$RUNNER_TEMP/src-cytoscape-desktop-mcp"; out="$RUNNER_TEMP/replay/cytoscape-desktop-mcp"; mkdir -p "$out"
-          git clone --depth 1 https://github.com/Xander-Xai/cytoscape-desktop-mcp.git "$dir" >"$out/clone.log" 2>&1
-          if [ $? -eq 0 ]; then
-            (cd "$dir" && make build_claude_mcpb && cp build/cytoscape-mcp.mcpb "$out/cytoscape-mcp.mcpb" && VER=$(jq -r '.version' claude-extension/manifest.json) && make stage-npm-bridge TAG="mcpb-v$VER" && (cd build/npm-staging && npm pack --silent) && cp build/npm-staging/*.tgz "$out/bridge.tgz") >"$out/build.log" 2>&1
-            if [ $? -ne 0 ]; then echo '--- Cytoscape MCPB build log ---' >&2; cat "$out/build.log" >&2 || true; fi
-          fi
+          (cd "$dir" && make build_claude_mcpb && cp build/cytoscape-mcp.mcpb "$out/cytoscape-mcp.mcpb" && VER=$(jq -r '.version' claude-extension/manifest.json) && make stage-npm-bridge TAG="mcpb-v$VER" && (cd build/npm-staging && npm pack --silent) && cp build/npm-staging/*.tgz "$out/bridge.tgz") >"$out/build.log" 2>&1 || echo '--- Cytoscape MCPB build log ---' >&2
           for artifact in "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/*.mcpb "$RUNNER_TEMP/replay/cytoscape-desktop-mcp"/bridge.tgz; do
             [ -f "$artifact" ] || continue; echo "$(basename "$artifact") $(sha256sum "$artifact" | cut -d' ' -f1)" >> "$RUNNER_TEMP/replay/cytoscape-desktop-mcp/artifact.sha256"
           done

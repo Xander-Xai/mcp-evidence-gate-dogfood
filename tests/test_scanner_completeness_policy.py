@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -44,6 +45,9 @@ class ScannerCompletenessPolicyTests(unittest.TestCase):
             self.assertEqual(_corpus_clean_eligible(case["agentgate"]), case["clean_eligible"], name)
     def test_producer_schema_fixture_blocks_failed_zero_findings(self) -> None:
         fixture = ROOT / "evidence" / "scanner-completeness" / "zero-findings-incomplete"
+        evidence_bytes = (fixture / "evidence.json").read_bytes()
+        receipt = json.loads((fixture / "receipt.json").read_text(encoding="utf-8"))
+        self.assertEqual(receipt["evidence_digest"], "sha256:" + hashlib.sha256(evidence_bytes).hexdigest())
         result = evaluate(fixture / "receipt.json", fixture / "evidence.json", ARTIFACT)
         self.assertEqual(result["integrity"], "pass")
         self.assertEqual(result["receipt_verdict"], "clean")
